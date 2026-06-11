@@ -366,9 +366,10 @@ def generate_aframe(elements, exhibitors, categories, output_file):
     inner = '\n'.join(booth_html)
 
     html = """<!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width">
     <title>AWE USA 2026 VR Map</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
     <script>
@@ -440,17 +441,18 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           }, { passive: false });
 
           // Shift-sprint: hold Shift to move 4x faster in 1:1 mode
-          var camEl = document.querySelector('a-camera');
-          var NORMAL_SPEED  = 5;   // A-Frame default wasd-controls speed (m/s)
-          var SPRINT_SPEED  = 20;  // 4x sprint
+          var NORMAL_ACCEL = 65;   // A-Frame default wasd-controls acceleration
+          var SPRINT_ACCEL = 260;  // 4x sprint
           window.addEventListener('keydown', function(e) {
             if (e.key === 'Shift' && !dollhouseMode) {
-              camEl.setAttribute('wasd-controls', 'speed', SPRINT_SPEED);
+              var cam = document.querySelector('a-camera');
+              if (cam) cam.setAttribute('wasd-controls', 'acceleration', SPRINT_ACCEL);
             }
           });
           window.addEventListener('keyup', function(e) {
             if (e.key === 'Shift') {
-              camEl.setAttribute('wasd-controls', 'speed', NORMAL_SPEED);
+              var cam = document.querySelector('a-camera');
+              if (cam) cam.setAttribute('wasd-controls', 'acceleration', NORMAL_ACCEL);
             }
           });
         }

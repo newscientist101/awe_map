@@ -812,7 +812,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
       <a-entity id="camera-rig" position="0 0 0">
         <a-camera user-height="0" position="0 1.753 0">
           <!-- HUD Map -->
-          <a-entity id="hud-map" position="-0.18 0.1 -0.35" rotation="60 0 0" scale="0.0008 0.0008 0.0008" hud-manager visible="true">
+          <a-entity id="hud-map" position="-0.18 0.1 -0.35" rotation="90 0 0" scale="0.0008 0.0008 0.0008" hud-manager visible="true">
             <a-plane width="450" height="450" color="#111" opacity="0.9" rotation="-90 0 0" position="0 -1.5 0"></a-plane>
             <a-entity id="hud-rotator">
               <a-entity id="hud-content">

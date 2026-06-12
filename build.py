@@ -394,8 +394,10 @@ def generate_aframe(elements, exhibitors, categories, output_file):
             mx = (x1 + x2) / 2
             mz = (z1 + z2) / 2
             my = WALL_HEIGHT / 2  # centre of wall vertically
-            # Rotation: A-Frame Y-axis rotation to align box length with edge
-            angle_deg = -math.degrees(math.atan2(dx, dz))
+            # Rotation: A-Frame Y-axis rotation to align box WIDTH (local +X) with edge.
+            # After Y rotation θ, local +X in world = (cos θ, 0, -sin θ).
+            # We want that to equal (dx, 0, dz)/len, so θ = atan2(-dz, dx).
+            angle_deg = math.degrees(math.atan2(-dz, dx))
             wall_html.append(
                 f'          <a-box '
                 f'position="{mx:.3f} {my:.3f} {mz:.3f}" '

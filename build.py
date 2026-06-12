@@ -546,6 +546,39 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         }
       });
 
+      AFRAME.registerComponent('rounded-rect', {
+        schema: {
+          width: {type: 'number', default: 1},
+          height: {type: 'number', default: 1},
+          radius: {type: 'number', default: 0.1},
+          color: {type: 'color', default: '#000'},
+          opacity: {type: 'number', default: 0.55}
+        },
+        init: function () {
+          var data = this.data;
+          var shape = new THREE.Shape();
+          var x = -data.width / 2, y = -data.height / 2;
+          var w = data.width, h = data.height, r = data.radius;
+          shape.moveTo(x, y + r);
+          shape.lineTo(x, y + h - r);
+          shape.quadraticCurveTo(x, y + h, x + r, y + h);
+          shape.lineTo(x + w - r, y + h);
+          shape.quadraticCurveTo(x + w, y + h, x + w, y + h - r);
+          shape.lineTo(x + w, y + r);
+          shape.quadraticCurveTo(x + w, y, x + w - r, y);
+          shape.lineTo(x + r, y);
+          shape.quadraticCurveTo(x, y, x, y + r);
+          var geometry = new THREE.ShapeGeometry(shape);
+          var material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(data.color),
+            transparent: true,
+            opacity: data.opacity,
+            side: THREE.DoubleSide
+          });
+          this.el.setObject3D('mesh', new THREE.Mesh(geometry, material));
+        }
+      });
+
       AFRAME.registerComponent('hud-manager', {
         init: function () {
           this.camera = document.querySelector('a-camera');
@@ -812,14 +845,14 @@ def generate_aframe(elements, exhibitors, categories, output_file):
       <a-entity id="camera-rig" position="0 0 0">
         <a-camera user-height="0" position="0 1.753 0">
           <!-- HUD Map -->
-          <a-entity id="hud-map" position="-0.18 0.1 -0.35" rotation="90 0 0" scale="0.0008 0.0008 0.0008" hud-manager visible="true">
-            <a-plane width="450" height="450" color="#111" opacity="0.9" rotation="-90 0 0" position="0 -1.5 0"></a-plane>
+          <a-entity id="hud-map" position="-0.28 -0.12 -0.35" rotation="90 0 0" scale="0.0008 0.0008 0.0008" hud-manager visible="true">
+            <a-entity rounded-rect="width: 300; height: 300; radius: 10; color: #000; opacity: 0.55" rotation="0 0 0" position="0 0 -1.5"></a-entity>
             <a-entity id="hud-rotator">
-              <a-entity id="hud-content">
+              <a-entity id="hud-content" scale="10 10 10" rotation="-90 0 0">
                 """ + hud_inner + """
               </a-entity>
             </a-entity>
-            <a-sphere id="hud-marker" radius="12" color="#FF3333" position="0 20 0"></a-sphere>
+            <a-sphere id="hud-marker" radius="6" color="#FF3333" position="0 20 0"></a-sphere>
           </a-entity>
         </a-camera>
       </a-entity>

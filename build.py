@@ -10,6 +10,7 @@ Usage:
 """
 
 import json
+import math
 import re
 import sys
 import shutil
@@ -363,7 +364,50 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     f'color="{fill}"></a-plane>'
                 )
 
-    inner = '\n'.join(booth_html)
+    # ── Outer walls: extruded from the show floor polygon (path-0) ─────────────
+    # Find the large grey show floor polygon (guid='path-0') and build a 20 m
+    # tall wall segment for each edge of its boundary.
+    WALL_HEIGHT = 20.0   # metres
+    WALL_COLOR  = '#9A9A9A'
+    WALL_THICKNESS = 0.3  # metres — thin but solid
+
+    floor_el = next((e for e in elements if e.get('guid') == 'path-0'), None)
+    wall_html = []
+    if floor_el and floor_el.get('positions'):
+        wall_html.append('        <a-entity id="outer-walls">')
+        pts = floor_el['positions']
+        n   = len(pts)
+        for i in range(n):
+            p1 = pts[i]
+            p2 = pts[(i + 1) % n]
+            # World-space X/Z (same transform as booth geometry)
+            x1 = (p1[0] - cx) * M
+            z1 = (p1[1] - cz) * M
+            x2 = (p2[0] - cx) * M
+            z2 = (p2[1] - cz) * M
+            dx = x2 - x1
+            dz = z2 - z1
+            seg_len = (dx*dx + dz*dz) ** 0.5
+            if seg_len < 0.01:
+                continue  # skip degenerate zero-length edges
+            # Midpoint
+            mx = (x1 + x2) / 2
+            mz = (z1 + z2) / 2
+            my = WALL_HEIGHT / 2  # centre of wall vertically
+            # Rotation: A-Frame Y-axis rotation to align box length with edge
+            angle_deg = -math.degrees(math.atan2(dx, dz))
+            wall_html.append(
+                f'          <a-box '
+                f'position="{mx:.3f} {my:.3f} {mz:.3f}" '
+                f'rotation="0 {angle_deg:.3f} 0" '
+                f'width="{seg_len:.3f}" '
+                f'height="{WALL_HEIGHT:.3f}" '
+                f'depth="{WALL_THICKNESS:.3f}" '
+                f'color="{WALL_COLOR}"></a-box>'
+            )
+        wall_html.append('        </a-entity>')
+
+    inner = '\n'.join(booth_html) + ('\n' + '\n'.join(wall_html) if wall_html else '')
 
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -417,17 +461,19 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           var camera = document.querySelector('#camera-rig');
 
           window.addEventListener('keydown', function(e) {
+            var walls = document.querySelector('#outer-walls');
             if (e.key === '1') {
               dollhouseMode = false;
               scene.setAttribute('scale',    '1 1 1');
               scene.setAttribute('position', '0 0 0');
               camera.setAttribute('position','0 1.753 0');
+              if (walls) walls.setAttribute('visible', 'true');
             } else if (e.key === '2') {
               dollhouseMode = true;
               scene.setAttribute('scale',    dollhouseScale + ' ' + dollhouseScale + ' ' + dollhouseScale);
               scene.setAttribute('position', '0 1 -2');
               camera.setAttribute('position','0 1.753 0');
-
+              if (walls) walls.setAttribute('visible', 'false');
             }
           });
 

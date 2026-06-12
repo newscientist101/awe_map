@@ -199,6 +199,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
     BG_Y_BASE = 0.001
     BG_Y_STEP = 0.001
     bg_y_map = {id(e): round(BG_Y_BASE + i * BG_Y_STEP, 4) for i, e in enumerate(bg_elements)}
+    bg_layer_map = {id(e): e.get('layer', '') for e in bg_elements}
     bg_ids   = {id(e) for e in bg_elements}
     # Booth floors render just above ground level (5mm) to prevent z-fighting with camera/background
     BOOTH_Y = 0.005
@@ -356,14 +357,14 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 pts_attr = pts_str.replace('"', '&quot;')
                 cells_attr = cells_str.replace('"', '&quot;')
                 booth_html.append(
-                    f'        <a-entity id="{guid}" '
+                    f'        <a-entity id="{guid}" data-layer="{bg_layer_map[id(e)]}" '
                     f'floor-polygon="points: {pts_attr}; cells: {cells_attr}; color: {fill}; y: {layer_y}">'
                     f'</a-entity>'
                 )
             else:
                 # Rect-based background element
                 booth_html.append(
-                    f'        <a-plane position="{x+w/2:.3f} {layer_y} {z+h/2:.3f}" '
+                    f'        <a-plane data-layer="{bg_layer_map[id(e)]}" position="{x+w/2:.3f} {layer_y} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" '
                     f'color="{fill}"></a-plane>'
                 )
@@ -414,6 +415,17 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         wall_html.append('        </a-entity>')
 
     inner = '\n'.join(booth_html) + ('\n' + '\n'.join(wall_html) if wall_html else '')
+    hud_inner = inner.replace('class="booth-furniture"', 'class="hud-furniture" visible="false"')
+    hud_inner = hud_inner.replace('class="booth-trigger"', 'class="hud-booth-trigger"')
+    hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar" visible="false"')
+    hud_inner = hud_inner.replace('id="outer-walls"', 'id="outer-walls" visible="false"')
+    # Remove Text, Icons, and Legend&Logo layers from HUD to keep it clean
+    for layer in ['Text', 'Icons', 'Legend&Logo']:
+        hud_inner = re.sub(rf'<a-(entity|plane)[^>]*data-layer="{layer}"[^>]*>.*?</a-\1>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+
+    hud_inner = re.sub(r'<a-text.*?</a-text>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-image.*?</a-image>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'id="([^"]+)"', r'id="hud-\1"', hud_inner)
 
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -531,6 +543,46 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               if (cam) cam.setAttribute('wasd-controls', 'acceleration', NORMAL_ACCEL);
             }
           });
+        }
+      });
+
+      AFRAME.registerComponent('hud-manager', {
+        init: function () {
+          this.camera = document.querySelector('a-camera');
+          this.rotator = document.querySelector('#hud-rotator');
+          this.content = document.querySelector('#hud-content');
+          this.marker = document.querySelector('#hud-marker');
+          this.visible = true;
+
+          window.addEventListener('keydown', function(e) {
+            if (e.key.toLowerCase() === 'm') {
+              this.visible = !this.visible;
+            }
+          }.bind(this));
+        },
+        tick: function () {
+          var shouldBeVisible = this.visible && !dollhouseMode;
+          if (this.el.getAttribute('visible') !== shouldBeVisible) {
+            this.el.setAttribute('visible', shouldBeVisible);
+          }
+          if (!shouldBeVisible) return;
+
+          var worldPos = new THREE.Vector3();
+          this.camera.object3D.getWorldPosition(worldPos);
+          var worldQuat = new THREE.Quaternion();
+          this.camera.object3D.getWorldQuaternion(worldQuat);
+          var worldEuler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
+
+          // Head-locked HUD: stays in the same place on the screen.
+          // To keep the map "North-up", we counter-rotate the rotator by the camera's yaw.
+          this.rotator.object3D.rotation.y = -worldEuler.y;
+
+          // The player is at the center of the HUD.
+          // We shift the map content by the negative of the camera position.
+          this.content.object3D.position.set(-worldPos.x, 0, -worldPos.z);
+
+          // Marker stays at the center of the HUD
+          this.marker.object3D.position.set(0, 5, 0);
         }
       });
 
@@ -758,7 +810,18 @@ def generate_aframe(elements, exhibitors, categories, output_file):
       <a-sky color="#ECECEC"></a-sky>
 
       <a-entity id="camera-rig" position="0 0 0">
-        <a-camera user-height="0" position="0 1.753 0"></a-camera>
+        <a-camera user-height="0" position="0 1.753 0">
+          <!-- HUD Map -->
+          <a-entity id="hud-map" position="-0.18 0.1 -0.35" rotation="60 0 0" scale="0.0008 0.0008 0.0008" hud-manager visible="true">
+            <a-plane width="450" height="450" color="#111" opacity="0.9" rotation="-90 0 0" position="0 -1.5 0"></a-plane>
+            <a-entity id="hud-rotator">
+              <a-entity id="hud-content">
+                """ + hud_inner + """
+              </a-entity>
+            </a-entity>
+            <a-sphere id="hud-marker" radius="12" color="#FF3333" position="0 20 0"></a-sphere>
+          </a-entity>
+        </a-camera>
       </a-entity>
 
       <a-entity id="expo-scene">
@@ -770,7 +833,8 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 color:#fff;padding:10px 14px;font-family:sans-serif;border-radius:6px;
                 font-size:14px;line-height:1.6;">
       <b>AWE USA 2026 VR Map</b><br>
-      Press <kbd>1</kbd> &mdash; 1:1 scale &nbsp;|&nbsp; Press <kbd>2</kbd> &mdash; Dollhouse
+      Press <kbd>1</kbd> &mdash; 1:1 scale &nbsp;|&nbsp; Press <kbd>2</kbd> &mdash; Dollhouse<br>
+      Press <kbd>M</kbd> &mdash; Toggle HUD Map
     </div>
   </body>
 </html>

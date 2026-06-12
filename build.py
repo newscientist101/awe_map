@@ -189,17 +189,26 @@ def generate_aframe(elements, exhibitors, categories, output_file):
 
     def is_pillar(e):
         try:
+            # User confirmed there are 9 pillars.
+            # They are small black rectangles in the Text layer.
+            # In V5 format, rectangles are often paths with 5 points.
             w = float(e.get('width', 0))
             h = float(e.get('height', 0))
-            # Heuristic: black fill, no exhibitor, and reasonably small (pillar-sized)
-            return e.get('fill') == '#000000' and not e.get('exhibitor_ids') and w < 20 and h < 20
+            pts = e.get('positions', [])
+            return (e.get('fill') == '#000000' and
+                    not e.get('exhibitor_ids') and
+                    e.get('tag') == 'path' and
+                    len(pts) == 5 and
+                    w < 10 and h < 10)
         except (ValueError, TypeError):
             return False
 
     # ── Background layers: assign strictly increasing Y (1mm steps) ──────────
     # Sorting by LAYER_ORDER ensures lower layers get lower Y values.
     BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text'}
-    bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids') and not is_pillar(e)]
+    # Pillars themselves should still be visible as floor shapes in dollhouse view,
+    # so we include them in the background elements.
+    bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids')]
 
     def layer_sort_key(e):
         try:
@@ -226,6 +235,15 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         if fill == 'none': fill = '#888888'
 
         ex_ids_str = e.get('exhibitor_ids', '')
+        # ── Structural Pillar (Extruded 3D box) ────────────────────────
+        if is_pillar(e):
+            booth_html.append(
+                f'        <a-box class="structural-pillar" '
+                f'position="{x+w/2:.3f} {PILLAR_HEIGHT/2:.3f} {z+h/2:.3f}" '
+                f'width="{w:.3f}" height="{PILLAR_HEIGHT:.3f}" depth="{h:.3f}" '
+                f'color="{PILLAR_COLOR}"></a-box>'
+            )
+
         if ex_ids_str:
             # ── Booth element ──────────────────────────────────────────────
             ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
@@ -348,15 +366,6 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 booth_html.append('          </a-entity>')
                 booth_html.append('        </a-entity>')
 
-        elif is_pillar(e):
-            # ── Structural Pillar ──────────────────────────────────────────
-            booth_html.append(
-                f'        <a-box class="structural-pillar" '
-                f'position="{x+w/2:.3f} {PILLAR_HEIGHT/2:.3f} {z+h/2:.3f}" '
-                f'width="{w:.3f}" height="{PILLAR_HEIGHT:.3f}" depth="{h:.3f}" '
-                f'color="{PILLAR_COLOR}"></a-box>'
-            )
-
         elif id(e) in bg_ids:
             # ── Background / floor element ─────────────────────────────────
             layer_y = bg_y_map[id(e)]
@@ -377,8 +386,9 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 # Escape the JSON for use inside an HTML attribute
                 pts_attr = pts_str.replace('"', '&quot;')
                 cells_attr = cells_str.replace('"', '&quot;')
+                extra_class = ' class="structural-pillar-floor"' if is_pillar(e) else ''
                 booth_html.append(
-                    f'        <a-entity id="{guid}" '
+                    f'        <a-entity id="{guid}"{extra_class} '
                     f'floor-polygon="points: {pts_attr}; cells: {cells_attr}; color: {fill}; y: {layer_y}">'
                     f'</a-entity>'
                 )

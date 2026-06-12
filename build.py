@@ -126,6 +126,7 @@ def parse_svg(svg_file):
                 if idx >= len(fp_paths):
                     return
                 positions = fp_paths[idx].get('positions', [])
+                cells     = fp_paths[idx].get('cells', [])
                 if len(positions) < 2:
                     return
                 bx, by, bw, bh = bounding_box(positions)
@@ -140,6 +141,7 @@ def parse_svg(svg_file):
                     'layer':         layer_id,
                     'fill':          fill,
                     'positions':     positions,
+                    'cells':         cells,
                 })
 
         for el in layer.childNodes:
@@ -183,7 +185,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
 
     # ── Background layers: assign strictly increasing Y (1mm steps) ──────────
     # Sorting by LAYER_ORDER ensures lower layers get lower Y values.
-    BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo'}
+    BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text'}
     bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids')]
 
     def layer_sort_key(e):
@@ -348,12 +350,14 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     [[round((p[0]-cx)*M, 3), round(-(p[1]-cz)*M, 3)]
                      for p in e['positions']]
                 )
+                cells_str = json.dumps(e.get('cells', []))
                 guid = e.get('guid', f'bg-{id(e)}')
                 # Escape the JSON for use inside an HTML attribute
                 pts_attr = pts_str.replace('"', '&quot;')
+                cells_attr = cells_str.replace('"', '&quot;')
                 booth_html.append(
                     f'        <a-entity id="{guid}" '
-                    f'floor-polygon="points: {pts_attr}; color: {fill}; y: {layer_y}">'
+                    f'floor-polygon="points: {pts_attr}; cells: {cells_attr}; color: {fill}; y: {layer_y}">'
                     f'</a-entity>'
                 )
             else:
@@ -424,21 +428,42 @@ def generate_aframe(elements, exhibitors, categories, output_file):
       AFRAME.registerComponent('floor-polygon', {
         schema: {
           points: { type: 'string' },
+          cells:  { type: 'string' },
           color:  { type: 'color',  default: '#888888' },
           y:      { type: 'number', default: 0 }
         },
         init: function () {
           var data  = this.data;
           var pts   = JSON.parse(data.points);  // [[x,z], ...] metres
-          var shape = new THREE.Shape();
-          shape.moveTo(pts[0][0], pts[0][1]);
-          for (var i = 1; i < pts.length; i++) {
-            shape.lineTo(pts[i][0], pts[i][1]);
+          var cells = data.cells ? JSON.parse(data.cells) : null;
+          var geo;
+
+          if (cells && cells.length > 0) {
+            // Use pre-triangulated cells from source data
+            geo = new THREE.BufferGeometry();
+            var vertices = [];
+            for (var i = 0; i < cells.length; i++) {
+              var cell = cells[i];
+              // Each cell is [idx1, idx2, idx3]
+              for (var j = 0; j < 3; j++) {
+                var p = pts[cell[j]];
+                vertices.push(p[0], 0, -p[1]); // x, y, z (where z is -shapeY)
+              }
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geo.computeVertexNormals();
+          } else {
+            // Fallback to re-triangulation if cells not available
+            var shape = new THREE.Shape();
+            shape.moveTo(pts[0][0], pts[0][1]);
+            for (var i = 1; i < pts.length; i++) {
+              shape.lineTo(pts[i][0], pts[i][1]);
+            }
+            shape.closePath();
+            geo = new THREE.ShapeGeometry(shape);
+            geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
           }
-          shape.closePath();
-          var geo  = new THREE.ShapeGeometry(shape);
-          // ShapeGeometry lives in XY plane; rotate to lie flat on XZ (floor)
-          geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+
           var mat  = new THREE.MeshStandardMaterial({
             color: new THREE.Color(data.color),
             side: THREE.DoubleSide,

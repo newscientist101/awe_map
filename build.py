@@ -183,9 +183,31 @@ def generate_aframe(elements, exhibitors, categories, output_file):
 
     booth_html = []
 
+    # ── Pillars ────────────────────────────────────────────────────────────
+    PILLAR_HEIGHT = 20.0
+    PILLAR_COLOR  = '#707070'  # Slightly darker than WALL_COLOR (#9A9A9A)
+
+    def is_pillar(e):
+        try:
+            # User confirmed there are 9 pillars.
+            # They are small black rectangles in the Text layer.
+            # In V5 format, rectangles are often paths with 5 points.
+            w = float(e.get('width', 0))
+            h = float(e.get('height', 0))
+            pts = e.get('positions', [])
+            return (e.get('fill') == '#000000' and
+                    not e.get('exhibitor_ids') and
+                    e.get('tag') == 'path' and
+                    len(pts) == 5 and
+                    w < 10 and h < 10)
+        except (ValueError, TypeError):
+            return False
+
     # ── Background layers: assign strictly increasing Y (1mm steps) ──────────
     # Sorting by LAYER_ORDER ensures lower layers get lower Y values.
     BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text'}
+    # Pillars themselves should still be visible as floor shapes in dollhouse view,
+    # so we include them in the background elements.
     bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids')]
 
     def layer_sort_key(e):
@@ -213,6 +235,15 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         if fill == 'none': fill = '#888888'
 
         ex_ids_str = e.get('exhibitor_ids', '')
+        # ── Structural Pillar (Extruded 3D box) ────────────────────────
+        if is_pillar(e):
+            booth_html.append(
+                f'        <a-box class="structural-pillar" '
+                f'position="{x+w/2:.3f} {PILLAR_HEIGHT/2:.3f} {z+h/2:.3f}" '
+                f'width="{w:.3f}" height="{PILLAR_HEIGHT:.3f}" depth="{h:.3f}" '
+                f'color="{PILLAR_COLOR}"></a-box>'
+            )
+
         if ex_ids_str:
             # ── Booth element ──────────────────────────────────────────────
             ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
@@ -355,8 +386,9 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 # Escape the JSON for use inside an HTML attribute
                 pts_attr = pts_str.replace('"', '&quot;')
                 cells_attr = cells_str.replace('"', '&quot;')
+                extra_class = ' class="structural-pillar-floor"' if is_pillar(e) else ''
                 booth_html.append(
-                    f'        <a-entity id="{guid}" '
+                    f'        <a-entity id="{guid}"{extra_class} '
                     f'floor-polygon="points: {pts_attr}; cells: {cells_attr}; color: {fill}; y: {layer_y}">'
                     f'</a-entity>'
                 )
@@ -490,6 +522,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           window.addEventListener('keydown', function(e) {
             var walls = document.querySelector('#outer-walls');
             var furniture = document.querySelectorAll('.booth-furniture');
+            var pillars = document.querySelectorAll('.structural-pillar');
             if (e.key === '1') {
               dollhouseMode = false;
               scene.setAttribute('scale',    '1 1 1');
@@ -497,6 +530,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'true');
               furniture.forEach(function(f) { f.setAttribute('visible', 'true'); });
+              pillars.forEach(function(p) { p.setAttribute('visible', 'true'); });
             } else if (e.key === '2') {
               dollhouseMode = true;
               scene.setAttribute('scale',    dollhouseScale + ' ' + dollhouseScale + ' ' + dollhouseScale);
@@ -504,6 +538,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'false');
               furniture.forEach(function(f) { f.setAttribute('visible', 'false'); });
+              pillars.forEach(function(p) { p.setAttribute('visible', 'false'); });
             }
           });
 

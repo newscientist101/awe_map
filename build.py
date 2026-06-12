@@ -183,10 +183,23 @@ def generate_aframe(elements, exhibitors, categories, output_file):
 
     booth_html = []
 
+    # ── Pillars ────────────────────────────────────────────────────────────
+    PILLAR_HEIGHT = 20.0
+    PILLAR_COLOR  = '#707070'  # Slightly darker than WALL_COLOR (#9A9A9A)
+
+    def is_pillar(e):
+        try:
+            w = float(e.get('width', 0))
+            h = float(e.get('height', 0))
+            # Heuristic: black fill, no exhibitor, and reasonably small (pillar-sized)
+            return e.get('fill') == '#000000' and not e.get('exhibitor_ids') and w < 20 and h < 20
+        except (ValueError, TypeError):
+            return False
+
     # ── Background layers: assign strictly increasing Y (1mm steps) ──────────
     # Sorting by LAYER_ORDER ensures lower layers get lower Y values.
     BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text'}
-    bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids')]
+    bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids') and not is_pillar(e)]
 
     def layer_sort_key(e):
         try:
@@ -334,6 +347,15 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     )
                 booth_html.append('          </a-entity>')
                 booth_html.append('        </a-entity>')
+
+        elif is_pillar(e):
+            # ── Structural Pillar ──────────────────────────────────────────
+            booth_html.append(
+                f'        <a-box class="structural-pillar" '
+                f'position="{x+w/2:.3f} {PILLAR_HEIGHT/2:.3f} {z+h/2:.3f}" '
+                f'width="{w:.3f}" height="{PILLAR_HEIGHT:.3f}" depth="{h:.3f}" '
+                f'color="{PILLAR_COLOR}"></a-box>'
+            )
 
         elif id(e) in bg_ids:
             # ── Background / floor element ─────────────────────────────────
@@ -490,6 +512,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           window.addEventListener('keydown', function(e) {
             var walls = document.querySelector('#outer-walls');
             var furniture = document.querySelectorAll('.booth-furniture');
+            var pillars = document.querySelectorAll('.structural-pillar');
             if (e.key === '1') {
               dollhouseMode = false;
               scene.setAttribute('scale',    '1 1 1');
@@ -497,6 +520,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'true');
               furniture.forEach(function(f) { f.setAttribute('visible', 'true'); });
+              pillars.forEach(function(p) { p.setAttribute('visible', 'true'); });
             } else if (e.key === '2') {
               dollhouseMode = true;
               scene.setAttribute('scale',    dollhouseScale + ' ' + dollhouseScale + ' ' + dollhouseScale);
@@ -504,6 +528,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'false');
               furniture.forEach(function(f) { f.setAttribute('visible', 'false'); });
+              pillars.forEach(function(p) { p.setAttribute('visible', 'false'); });
             }
           });
 

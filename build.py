@@ -272,11 +272,11 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} 0.41 {z+h/2:.3f}" '
+                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} 0.41 {z+h/2:.3f}" '
                     f'width="{w*0.6:.3f}" height="0.8" depth="{h*0.4:.3f}" color="#4CC3D9"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-plane position="{x+w/2:.3f} 1.25 {z-0.01:.3f}" '
+                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} 1.25 {z-0.01:.3f}" '
                     f'width="{w:.3f}" height="2.5" color="#FFF" rotation="0 0 0">'
                 )
                 booth_html.append(
@@ -321,7 +321,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-entity position="{x+w/2:.3f} 2.5 {z+h/2:.3f}">'
+                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} 2.5 {z+h/2:.3f}">'
                 )
                 booth_html.append(
                     f'            <a-text value="{safe_name}" align="center" color="#000" '
@@ -489,18 +489,21 @@ def generate_aframe(elements, exhibitors, categories, output_file):
 
           window.addEventListener('keydown', function(e) {
             var walls = document.querySelector('#outer-walls');
+            var furniture = document.querySelectorAll('.booth-furniture');
             if (e.key === '1') {
               dollhouseMode = false;
               scene.setAttribute('scale',    '1 1 1');
               scene.setAttribute('position', '0 0 0');
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'true');
+              furniture.forEach(function(f) { f.setAttribute('visible', 'true'); });
             } else if (e.key === '2') {
               dollhouseMode = true;
               scene.setAttribute('scale',    dollhouseScale + ' ' + dollhouseScale + ' ' + dollhouseScale);
               scene.setAttribute('position', '0 1 -2');
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'false');
+              furniture.forEach(function(f) { f.setAttribute('visible', 'false'); });
             }
           });
 

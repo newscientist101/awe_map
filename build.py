@@ -493,13 +493,47 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         }
       });
 
+      AFRAME.registerComponent('stencil-masked', {
+        schema: {
+          stencilRef: { type: 'number', default: 1 }
+        },
+        init: function () {
+          this.el.addEventListener('object3dset', this.applyMask.bind(this));
+          this.applyMask();
+        },
+        applyMask: function () {
+          var stencilRef = this.data.stencilRef;
+          this.el.object3D.traverse(function (obj) {
+            if (obj.material) {
+              // Clone materials to avoid affecting shared materials in the main scene
+              if (Array.isArray(obj.material)) {
+                obj.material = obj.material.map(function(m) {
+                  var m2 = m.clone();
+                  m2.stencilWrite = true;
+                  m2.stencilRef = stencilRef;
+                  m2.stencilFunc = THREE.EqualStencilFunc;
+                  return m2;
+                });
+              } else {
+                var m = obj.material.clone();
+                m.stencilWrite = true;
+                m.stencilRef = stencilRef;
+                m.stencilFunc = THREE.EqualStencilFunc;
+                obj.material = m;
+              }
+            }
+          });
+        }
+      });
+
       AFRAME.registerComponent('rounded-rect', {
         schema: {
           width: { type: 'number', default: 1 },
           height: { type: 'number', default: 1 },
           radius: { type: 'number', default: 0.1 },
           color: { type: 'color', default: '#FFF' },
-          opacity: { type: 'number', default: 1 }
+          opacity: { type: 'number', default: 1 },
+          stencilRef: { type: 'number', default: 0 }
         },
         init: function () {
           var data = this.data;
@@ -521,12 +555,23 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           shape.quadraticCurveTo(x, y, x, y + r);
 
           var geometry = new THREE.ShapeGeometry(shape);
-          var material = new THREE.MeshBasicMaterial({
+          var matProps = {
             color: new THREE.Color(data.color),
             transparent: data.opacity < 1,
             opacity: data.opacity,
             side: THREE.DoubleSide
-          });
+          };
+
+          if (data.stencilRef > 0) {
+            matProps.stencilWrite = true;
+            matProps.stencilRef = data.stencilRef;
+            matProps.stencilFunc = THREE.AlwaysStencilFunc;
+            matProps.stencilZPass = THREE.ReplaceStencilOp;
+            matProps.colorWrite = false; // Mask is invisible, only writes to stencil
+            matProps.depthWrite = false;
+          }
+
+          var material = new THREE.MeshBasicMaterial(matProps);
           var mesh = new THREE.Mesh(geometry, material);
           this.el.setObject3D('mesh', mesh);
         }
@@ -858,12 +903,14 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           <!-- HUD Map -->
           <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">
             <a-entity id="hud-map-bg" rounded-rect="width: 167; height: 167; radius: 3.6; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
-            <a-entity id="hud-rotator">
+            <a-entity id="hud-mask" rounded-rect="width: 167; height: 167; radius: 3.6; stencilRef: 1" rotation="-90 0 0" position="0 -0.5 0"></a-entity>
+            <!-- hud-rotator does not need rotation because floor-polygon children are already in XZ plane (facing camera) -->
+            <a-entity id="hud-rotator" stencil-masked="stencilRef: 1">
               <a-entity id="hud-content">
                 """ + hud_inner + """
               </a-entity>
             </a-entity>
-            <a-sphere id="hud-marker" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
+            <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
           </a-entity>
         </a-camera>
       </a-entity>

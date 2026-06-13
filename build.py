@@ -722,6 +722,17 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         }
       });
 
+      AFRAME.registerComponent('vr-hud-toggle', {
+        init: function() {
+          this.el.addEventListener('abuttondown', function() {
+            var hud = document.querySelector('#hud-map');
+            if (hud) {
+              hud.emit('toggle-hud');
+            }
+          });
+        }
+      });
+
       AFRAME.registerComponent('scale-switcher', {
         init: function () {
           var scene  = document.querySelector('#expo-scene');
@@ -788,6 +799,10 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             if (e.key.toLowerCase() === 'm') {
               this.visible = !this.visible;
             }
+          }.bind(this));
+
+          this.el.addEventListener('toggle-hud', function() {
+            this.visible = !this.visible;
           }.bind(this));
         },
         tick: function () {
@@ -1042,7 +1057,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
         <a-entity camera position="0 1.753 0" look-controls></a-entity>
         <a-entity oculus-touch-controls="hand: left" vr-controller-sprint></a-entity>
-        <a-entity oculus-touch-controls="hand: right"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" vr-hud-toggle></a-entity>
         <a-camera user-height="0" position="0 1.753 0">
           <!-- HUD Map -->
           <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">

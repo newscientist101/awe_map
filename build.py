@@ -233,24 +233,21 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
 
     bg_elements.sort(key=layer_sort_key)
 
-    # Background uses 0.5mm increments per LAYER to keep booths close to ground.
-    BG_Y_BASE = 0.0005
-    BG_Y_STEP = 0.0005
+    # Background uses 0.1mm increments per ELEMENT to prevent z-fighting
+    # between overlapping shapes in the same layer (e.g. symbols on map features).
+    # Since bg_elements was stably sorted by LAYER_ORDER, this preserves
+    # layer order while also resolving intra-layer overlaps using SVG document order.
+    BG_Y_BASE = 0.0001
+    BG_Y_STEP = 0.0001
     bg_y_map = {}
-    current_layer = None
-    layer_idx = -1
-    for e in bg_elements:
-        l = e.get('layer')
-        if l != current_layer:
-            current_layer = l
-            layer_idx += 1
-        bg_y_map[id(e)] = round(BG_Y_BASE + layer_idx * BG_Y_STEP, 4)
+    for i, e in enumerate(bg_elements):
+        bg_y_map[id(e)] = round(BG_Y_BASE + i * BG_Y_STEP, 4)
 
     bg_layer_map = {id(e): e.get('layer', '') for e in bg_elements}
     bg_ids   = {id(e) for e in bg_elements}
 
     # Highest Y assigned to any background element
-    MAX_BG_Y = round(BG_Y_BASE + (layer_idx if layer_idx >= 0 else 0) * BG_Y_STEP, 4)
+    MAX_BG_Y = round(BG_Y_BASE + (len(bg_elements) - 1 if bg_elements else 0) * BG_Y_STEP, 4)
 
     # Booth floors render above ALL background elements to prevent z-fighting.
     # 1mm gap is sufficient for A-Frame's default depth buffer.

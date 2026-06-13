@@ -110,6 +110,12 @@ def parse_svg(svg_file):
                 x, y, w, h = (el.getAttribute(a) for a in ('x', 'y', 'width', 'height'))
                 if not (x and y and w and h):
                     return
+                transform = el.getAttribute('transform') or ''
+                rotation = 0
+                rot_match = re.search(r'rotate\(([-0-9.]+)\)', transform)
+                if rot_match:
+                    rotation = float(rot_match.group(1))
+
                 elements.append({
                     'guid':          el.getAttribute('id'),
                     'tag':           'rect',
@@ -117,6 +123,7 @@ def parse_svg(svg_file):
                     'exhibitor_ids': el.getAttribute('data-exhibitors'),
                     'layer':         layer_id,
                     'fill':          fill,
+                    'rotation':      rotation,
                 })
             elif tag == 'path':
                 idx_str = el.getAttribute('data-index')
@@ -257,8 +264,14 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     BOOTH_Y = round(MAX_BG_Y + 0.001, 4)
 
     for e in valid:
-        x = (float(e['x']) - cx) * M
-        z = (float(e['y']) - cz) * M
+        # Initial local center relative to SVG origin
+        lx = float(e['x']) + float(e['width']) / 2
+        lz = float(e['y']) + float(e['height']) / 2
+
+        rot = e.get('rotation', 0)
+
+        x = (lx - cx) * M
+        z = (lz - cz) * M
         w = float(e['width'])  * M
         h = float(e['height']) * M
 
@@ -272,7 +285,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         if is_pillar(e):
             booth_html.append(
                 f'        <a-box class="structural-pillar" '
-                f'position="{x+w/2:.3f} {PILLAR_HEIGHT/2:.3f} {z+h/2:.3f}" '
+                f'position="{x:.3f} {PILLAR_HEIGHT/2:.3f} {z:.3f}" '
+                f'rotation="0 {-rot:.3f} 0" '
                 f'width="{w:.3f}" height="{PILLAR_HEIGHT:.3f}" depth="{h:.3f}" '
                 f'color="{PILLAR_COLOR}"></a-box>'
             )
@@ -327,6 +341,22 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             aabb_max_x = round(x + w, 3)
             aabb_max_z = round(z + h, 3)
 
+            # Calculate AABB of rotated rectangle for proximity detection
+            hw, hh = w/2, h/2
+            cos_a = math.cos(math.radians(rot))
+            sin_a = math.sin(math.radians(rot))
+            corners = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+            rotated_corners = []
+            for dx, dz in corners:
+                # SVG rotation is clockwise
+                rx = dx * cos_a - dz * sin_a
+                rz = dx * sin_a + dz * cos_a
+                rotated_corners.append((x + rx, z + rz))
+
+            aabb_min_x = round(min(c[0] for c in rotated_corners), 3)
+            aabb_min_z = round(min(c[1] for c in rotated_corners), 3)
+            aabb_max_x = round(max(c[0] for c in rotated_corners), 3)
+            aabb_max_z = round(max(c[1] for c in rotated_corners), 3)
             #Fix child booth y
             this_booth_y = BOOTH_Y
             if location.upper() in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7', 'LBE3']:
@@ -347,9 +377,11 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'        <a-entity class="booth-trigger" '
                     f'data-name="{safe_name}" data-cats="{safe_cats}" data-desc="{safe_desc}" '
                     f'data-minx="{aabb_min_x}" data-minz="{aabb_min_z}" '
-                    f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}">'
+                    f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}" '
+                    f'position="{x:.3f} {BOOTH_Y} {z:.3f}" rotation="0 {-rot:.3f} 0">'
                 )
                 booth_html.append(
+                    f'          <a-plane position="0 0 0" '
                     f'          <a-plane position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
@@ -409,7 +441,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'        <a-entity class="booth-trigger" '
                     f'data-name="{safe_name}" data-cats="{safe_cats}" data-desc="{safe_desc}" '
                     f'data-minx="{aabb_min_x}" data-minz="{aabb_min_z}" '
-                    f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}">'
+                    f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}" '
+                    f'position="{x:.3f} {BOOTH_Y} {z:.3f}" rotation="0 {-rot:.3f} 0">'
                 )
                 booth_html.append(
                     f'          <a-plane position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
@@ -489,9 +522,14 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 )
             else:
                 # Rect-based background element
+                # In A-Frame, rotation="x y z" applies in that order (Euler).
+                # We want the plane to lie on the XZ floor (rotationX = -90).
+                # Then we rotate it around the world Y axis (which is the local Z axis
+                # after the -90 rotationX).
+                # SVG rotation N (clockwise) maps to A-Frame rotationY -N (counter-clockwise).
                 booth_html.append(
-                    f'        <a-plane data-layer="{bg_layer_map[id(e)]}" position="{x+w/2:.3f} {layer_y} {z+h/2:.3f}" '
-                    f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" '
+                    f'        <a-plane data-layer="{bg_layer_map[id(e)]}" position="{x:.3f} {layer_y} {z:.3f}" '
+                    f'rotation="-90 {-rot:.3f} 0" width="{w:.3f}" height="{h:.3f}" '
                     f'color="{fill}"></a-plane>'
                 )
 

@@ -182,13 +182,18 @@ def parse_metadata(data_file):
 def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, output_file):
     valid = [e for e in elements if e['x'] and e['y'] and e['width'] and e['height']]
 
-    min_x = min(float(e['x'])                    for e in valid)
-    max_x = max(float(e['x']) + float(e['width']) for e in valid)
-    min_y = min(float(e['y'])                    for e in valid)
-    max_y = max(float(e['y']) + float(e['height']) for e in valid)
-
-    cx = (min_x + max_x) / 2
-    cz = (min_y + max_y) / 2
+    # Center the scene on the main show floor (path-0)
+    floor_el = next((e for e in elements if e.get('guid') == 'path-0'), None)
+    if floor_el:
+        cx = float(floor_el['x']) + float(floor_el['width']) / 2
+        cz = float(floor_el['y']) + float(floor_el['height']) / 2
+    else:
+        min_x = min(float(e['x'])                    for e in valid)
+        max_x = max(float(e['x']) + float(e['width']) for e in valid)
+        min_y = min(float(e['y'])                    for e in valid)
+        max_y = max(float(e['y']) + float(e['height']) for e in valid)
+        cx = (min_x + max_x) / 2
+        cz = (min_y + max_y) / 2
     M  = 0.3048  # feet → metres
 
     booth_html = []
@@ -231,6 +236,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     BG_Y_BASE = 0.001
     BG_Y_STEP = 0.001
     bg_y_map = {id(e): round(BG_Y_BASE + i * BG_Y_STEP, 4) for i, e in enumerate(bg_elements)}
+    bg_layer_map = {id(e): e.get('layer', '') for e in bg_elements}
     bg_ids   = {id(e) for e in bg_elements}
 
     # Highest Y assigned to any background element
@@ -430,14 +436,14 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 cells_attr = cells_str.replace('"', '&quot;')
                 extra_class = ' class="structural-pillar-floor"' if is_pillar(e) else ''
                 booth_html.append(
-                    f'        <a-entity id="{guid}"{extra_class} '
+                    f'        <a-entity id="{guid}"{extra_class} data-layer="{bg_layer_map[id(e)]}" '
                     f'floor-polygon="points: {pts_attr}; cells: {cells_attr}; color: {fill}; y: {layer_y}">'
                     f'</a-entity>'
                 )
             else:
                 # Rect-based background element
                 booth_html.append(
-                    f'        <a-plane position="{x+w/2:.3f} {layer_y} {z+h/2:.3f}" '
+                    f'        <a-plane data-layer="{bg_layer_map[id(e)]}" position="{x+w/2:.3f} {layer_y} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" '
                     f'color="{fill}"></a-plane>'
                 )
@@ -488,6 +494,17 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         wall_html.append('        </a-entity>')
 
     inner = '\n'.join(booth_html) + ('\n' + '\n'.join(wall_html) if wall_html else '')
+    hud_inner = inner.replace('class="booth-furniture"', 'class="hud-furniture" visible="false"')
+    hud_inner = hud_inner.replace('class="booth-trigger"', 'class="hud-booth-trigger"')
+    hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar" visible="false"')
+    hud_inner = hud_inner.replace('id="outer-walls"', 'id="outer-walls" visible="false"')
+    # Remove Text, Icons, and Legend&Logo layers from HUD to keep it clean
+    for layer in ['Text', 'Icons', 'Legend&Logo']:
+        hud_inner = re.sub(rf'<a-(entity|plane)[^>]*data-layer="{layer}"[^>]*>.*?</a-\1>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+
+    hud_inner = re.sub(r'<a-text.*?</a-text>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-image.*?</a-image>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'id="([^"]+)"', r'id="hud-\1"', hud_inner)
 
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -546,6 +563,90 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           });
           var mesh = new THREE.Mesh(geo, mat);
           mesh.position.y = data.y;
+          this.el.setObject3D('mesh', mesh);
+        }
+      });
+
+      AFRAME.registerComponent('stencil-masked', {
+        schema: {
+          stencilRef: { type: 'number', default: 1 }
+        },
+        init: function () {
+          this.el.addEventListener('object3dset', this.applyMask.bind(this));
+          this.applyMask();
+        },
+        applyMask: function () {
+          var stencilRef = this.data.stencilRef;
+          this.el.object3D.traverse(function (obj) {
+            if (obj.material) {
+              // Clone materials to avoid affecting shared materials in the main scene
+              if (Array.isArray(obj.material)) {
+                obj.material = obj.material.map(function(m) {
+                  var m2 = m.clone();
+                  m2.stencilWrite = true;
+                  m2.stencilRef = stencilRef;
+                  m2.stencilFunc = THREE.EqualStencilFunc;
+                  return m2;
+                });
+              } else {
+                var m = obj.material.clone();
+                m.stencilWrite = true;
+                m.stencilRef = stencilRef;
+                m.stencilFunc = THREE.EqualStencilFunc;
+                obj.material = m;
+              }
+            }
+          });
+        }
+      });
+
+      AFRAME.registerComponent('rounded-rect', {
+        schema: {
+          width: { type: 'number', default: 1 },
+          height: { type: 'number', default: 1 },
+          radius: { type: 'number', default: 0.1 },
+          color: { type: 'color', default: '#FFF' },
+          opacity: { type: 'number', default: 1 },
+          stencilRef: { type: 'number', default: 0 }
+        },
+        init: function () {
+          var data = this.data;
+          var shape = new THREE.Shape();
+          var x = -data.width / 2;
+          var y = -data.height / 2;
+          var w = data.width;
+          var h = data.height;
+          var r = data.radius;
+
+          shape.moveTo(x, y + r);
+          shape.lineTo(x, y + h - r);
+          shape.quadraticCurveTo(x, y + h, x + r, y + h);
+          shape.lineTo(x + w - r, y + h);
+          shape.quadraticCurveTo(x + w, y + h, x + w, y + h - r);
+          shape.lineTo(x + w, y + r);
+          shape.quadraticCurveTo(x + w, y, x + w - r, y);
+          shape.lineTo(x + r, y);
+          shape.quadraticCurveTo(x, y, x, y + r);
+
+          var geometry = new THREE.ShapeGeometry(shape);
+          var matProps = {
+            color: new THREE.Color(data.color),
+            transparent: data.opacity < 1,
+            opacity: data.opacity,
+            side: THREE.DoubleSide
+          };
+
+          if (data.stencilRef > 0) {
+            matProps.stencilWrite = true;
+            matProps.stencilRef = data.stencilRef;
+            matProps.stencilFunc = THREE.AlwaysStencilFunc;
+            matProps.stencilZPass = THREE.ReplaceStencilOp;
+            matProps.colorWrite = false; // Mask is invisible, only writes to stencil
+            matProps.depthWrite = false;
+          }
+
+          var material = new THREE.MeshBasicMaterial(matProps);
+          var mesh = new THREE.Mesh(geometry, material);
           this.el.setObject3D('mesh', mesh);
         }
       });
@@ -611,6 +712,46 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
               if (cam) cam.setAttribute('wasd-controls', 'acceleration', NORMAL_ACCEL);
             }
           });
+        }
+      });
+
+      AFRAME.registerComponent('hud-manager', {
+        init: function () {
+          this.camera = document.querySelector('a-camera');
+          this.rotator = document.querySelector('#hud-rotator');
+          this.content = document.querySelector('#hud-content');
+          this.marker = document.querySelector('#hud-marker');
+          this.visible = true;
+
+          window.addEventListener('keydown', function(e) {
+            if (e.key.toLowerCase() === 'm') {
+              this.visible = !this.visible;
+            }
+          }.bind(this));
+        },
+        tick: function () {
+          var shouldBeVisible = this.visible && !dollhouseMode;
+          if (this.el.getAttribute('visible') !== shouldBeVisible) {
+            this.el.setAttribute('visible', shouldBeVisible);
+          }
+          if (!shouldBeVisible) return;
+
+          var worldPos = new THREE.Vector3();
+          this.camera.object3D.getWorldPosition(worldPos);
+          var worldQuat = new THREE.Quaternion();
+          this.camera.object3D.getWorldQuaternion(worldQuat);
+          var worldEuler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
+
+          // Head-locked HUD: stays in the same place on the screen.
+          // To keep the map "North-up", we counter-rotate the rotator by the camera's yaw.
+          this.rotator.object3D.rotation.y = -worldEuler.y;
+
+          // The player is at the center of the HUD.
+          // We shift the map content by the negative of the camera position.
+          this.content.object3D.position.set(-worldPos.x, 0, -worldPos.z);
+
+          // Marker stays at the center of the HUD
+          this.marker.object3D.position.set(0, 5, 0);
         }
       });
 
@@ -838,7 +979,20 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
       <a-sky color="#ECECEC"></a-sky>
 
       <a-entity id="camera-rig" position="0 0 0">
-        <a-camera user-height="0" position="0 1.753 0"></a-camera>
+        <a-camera user-height="0" position="0 1.753 0">
+          <!-- HUD Map -->
+          <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">
+            <a-entity id="hud-map-bg" rounded-rect="width: 167; height: 167; radius: 3.6; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
+            <a-entity id="hud-mask" rounded-rect="width: 167; height: 167; radius: 3.6; stencilRef: 1" rotation="-90 0 0" position="0 -0.5 0"></a-entity>
+            <!-- hud-rotator does not need rotation because floor-polygon children are already in XZ plane (facing camera) -->
+            <a-entity id="hud-rotator" stencil-masked="stencilRef: 1">
+              <a-entity id="hud-content">
+                """ + hud_inner + """
+              </a-entity>
+            </a-entity>
+            <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
+          </a-entity>
+        </a-camera>
       </a-entity>
 
       <a-entity id="expo-scene">
@@ -850,7 +1004,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 color:#fff;padding:10px 14px;font-family:sans-serif;border-radius:6px;
                 font-size:14px;line-height:1.6;">
       <b>AWE USA 2026 VR Map</b><br>
-      Press <kbd>1</kbd> &mdash; 1:1 scale &nbsp;|&nbsp; Press <kbd>2</kbd> &mdash; Dollhouse
+      Press <kbd>1</kbd> &mdash; 1:1 scale &nbsp;|&nbsp; Press <kbd>2</kbd> &mdash; Dollhouse<br>
+      Press <kbd>M</kbd> &mdash; Toggle HUD Map
     </div>
   </body>
 </html>

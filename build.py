@@ -233,12 +233,13 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
 
     bg_elements.sort(key=layer_sort_key)
 
-    # Background uses 0.1mm increments per ELEMENT to prevent z-fighting
+    # Background uses 5mm increments per ELEMENT to prevent z-fighting
     # between overlapping shapes in the same layer (e.g. symbols on map features).
     # Since bg_elements was stably sorted by LAYER_ORDER, this preserves
     # layer order while also resolving intra-layer overlaps using SVG document order.
-    BG_Y_BASE = 0.0001
-    BG_Y_STEP = 0.0001
+    # We use a larger step (5mm) to be well within the depth buffer precision.
+    BG_Y_BASE = 0.005
+    BG_Y_STEP = 0.005
     bg_y_map = {}
     for i, e in enumerate(bg_elements):
         bg_y_map[id(e)] = round(BG_Y_BASE + i * BG_Y_STEP, 4)
@@ -250,8 +251,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     MAX_BG_Y = round(BG_Y_BASE + (len(bg_elements) - 1 if bg_elements else 0) * BG_Y_STEP, 4)
 
     # Booth floors render above ALL background elements to prevent z-fighting.
-    # 1mm gap is sufficient for A-Frame's default depth buffer.
-    BOOTH_Y = round(MAX_BG_Y + 0.001, 4)
+    # 2cm gap is used to ensure they are clearly on top.
+    BOOTH_Y = round(MAX_BG_Y + 0.02, 4)
 
     for e in valid:
         x = (float(e['x']) - cx) * M
@@ -694,6 +695,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         init: function () {
           var scene  = document.querySelector('#expo-scene');
           var camera = document.querySelector('#camera-rig');
+          var BOOTH_Y = """ + str(BOOTH_Y) + """;
 
           window.addEventListener('keydown', function(e) {
             var walls = document.querySelector('#outer-walls');
@@ -704,7 +706,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
               dollhouseMode = false;
               scene.setAttribute('scale',    '1 1 1');
               scene.setAttribute('position', '0 0 0');
-              camera.setAttribute('position','0 1.753 0');
+              camera.setAttribute('position', '0 ' + (1.753 + BOOTH_Y) + ' 0');
               if (walls) walls.setAttribute('visible', 'true');
               furniture.forEach(function(f) { f.setAttribute('visible', 'true'); });
               locs.forEach(function(l) { l.setAttribute('visible', 'false'); });
@@ -713,7 +715,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
               dollhouseMode = true;
               scene.setAttribute('scale',    dollhouseScale + ' ' + dollhouseScale + ' ' + dollhouseScale);
               scene.setAttribute('position', '0 1 -2');
-              camera.setAttribute('position','0 1.753 0');
+              camera.setAttribute('position', '0 ' + (1.753 + BOOTH_Y) + ' 0');
               if (walls) walls.setAttribute('visible', 'false');
               furniture.forEach(function(f) { f.setAttribute('visible', 'false'); });
               locs.forEach(function(l) { l.setAttribute('visible', 'true'); });
@@ -1011,7 +1013,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     <a-scene scale-switcher>
       <a-sky color="#ECECEC"></a-sky>
 
-      <a-entity id="camera-rig" position="0 0 0">
+      <a-entity id="camera-rig" position="0 """ + str(BOOTH_Y) + """ 0">
         <a-camera user-height="0" position="0 1.753 0">
           <!-- HUD Map -->
           <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">

@@ -851,14 +851,14 @@ def generate_aframe(elements, exhibitors, categories, output_file):
       <a-entity id="camera-rig" position="0 0 0">
         <a-camera user-height="0" position="0 1.753 0">
           <!-- HUD Map -->
-          <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.00045 0.00045 0.00045" hud-manager visible="true">
-            <a-entity id="hud-map-bg" rounded-rect="width: 555; height: 555; radius: 12; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
+          <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.001 0.001 0.001" hud-manager visible="true">
+            <a-entity id="hud-map-bg" rounded-rect="width: 250; height: 250; radius: 5.4; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
             <a-entity id="hud-rotator">
               <a-entity id="hud-content">
                 """ + hud_inner + """
               </a-entity>
             </a-entity>
-            <a-sphere id="hud-marker" radius="12" color="#FF3333" position="0 20 0"></a-sphere>
+            <a-sphere id="hud-marker" radius="5.4" color="#FF3333" position="0 20 0"></a-sphere>
           </a-entity>
         </a-camera>
       </a-entity>

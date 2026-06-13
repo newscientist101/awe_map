@@ -218,9 +218,9 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         except (ValueError, TypeError):
             return False
 
-    # ── Background layers: assign strictly increasing Y (1mm steps) ──────────
+    # ── Background layers: assign strictly increasing Y (per layer) ──────────
     # Sorting by LAYER_ORDER ensures lower layers get lower Y values.
-    BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text'}
+    BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text', 'Booths'}
     # Pillars themselves should still be visible as floor shapes in dollhouse view,
     # so we include them in the background elements.
     bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids')]
@@ -232,18 +232,29 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             return 99
 
     bg_elements.sort(key=layer_sort_key)
-    # Background uses 1mm increments starting at 0.001m
-    BG_Y_BASE = 0.001
-    BG_Y_STEP = 0.001
-    bg_y_map = {id(e): round(BG_Y_BASE + i * BG_Y_STEP, 4) for i, e in enumerate(bg_elements)}
+
+    # Background uses 0.5mm increments per LAYER to keep booths close to ground.
+    BG_Y_BASE = 0.0005
+    BG_Y_STEP = 0.0005
+    bg_y_map = {}
+    current_layer = None
+    layer_idx = -1
+    for e in bg_elements:
+        l = e.get('layer')
+        if l != current_layer:
+            current_layer = l
+            layer_idx += 1
+        bg_y_map[id(e)] = round(BG_Y_BASE + layer_idx * BG_Y_STEP, 4)
+
     bg_layer_map = {id(e): e.get('layer', '') for e in bg_elements}
     bg_ids   = {id(e) for e in bg_elements}
 
     # Highest Y assigned to any background element
-    MAX_BG_Y = BG_Y_BASE + len(bg_elements) * BG_Y_STEP
+    MAX_BG_Y = round(BG_Y_BASE + (layer_idx if layer_idx >= 0 else 0) * BG_Y_STEP, 4)
 
-    # Booth floors render above ALL background elements to prevent z-fighting with logo/legend
-    BOOTH_Y = round(MAX_BG_Y + 0.01, 4)
+    # Booth floors render above ALL background elements to prevent z-fighting.
+    # 1mm gap is sufficient for A-Frame's default depth buffer.
+    BOOTH_Y = round(MAX_BG_Y + 0.001, 4)
 
     for e in valid:
         x = (float(e['x']) - cx) * M
@@ -325,11 +336,11 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} 0.41 {z+h/2:.3f}" '
+                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} {BOOTH_Y+0.4:.3f} {z+h/2:.3f}" '
                     f'width="{w*0.6:.3f}" height="0.8" depth="{h*0.4:.3f}" color="#4CC3D9"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} 1.25 {z-0.01:.3f}" '
+                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} {BOOTH_Y+1.25:.3f} {z-0.01:.3f}" '
                     f'width="{w:.3f}" height="2.5" color="#FFF" rotation="0 0 0">'
                 )
                 booth_html.append(
@@ -387,7 +398,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} 2.5 {z+h/2:.3f}">'
+                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} {BOOTH_Y+2.5:.3f} {z+h/2:.3f}">'
                 )
                 booth_html.append(
                     f'            <a-text value="{safe_name}" align="center" color="#000" '

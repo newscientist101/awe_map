@@ -165,27 +165,64 @@ def parse_metadata(data_file):
     data  = json.loads(content[start:end])
     exhibitors = {ex['id']: ex for ex in data.get('exhibitors', [])}
     categories = {cat['id']: cat['name'] for cat in data.get('categories', [])}
-    return exhibitors, categories
+    booths = data.get('booths', [])
+
+    # Map exhibitor ID to location (booth externalId)
+    exhibitor_to_location = {}
+    for booth in booths:
+        location = booth.get('externalId')
+        if location:
+            for ex_id in booth.get('exhibitors', []):
+                exhibitor_to_location[ex_id] = location
+
+    return exhibitors, categories, exhibitor_to_location
 
 # ── A-Frame generation ─────────────────────────────────────────────────────────
 
-def generate_aframe(elements, exhibitors, categories, output_file):
+def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, output_file):
     valid = [e for e in elements if e['x'] and e['y'] and e['width'] and e['height']]
 
-    min_x = min(float(e['x'])                    for e in valid)
-    max_x = max(float(e['x']) + float(e['width']) for e in valid)
-    min_y = min(float(e['y'])                    for e in valid)
-    max_y = max(float(e['y']) + float(e['height']) for e in valid)
-
-    cx = (min_x + max_x) / 2
-    cz = (min_y + max_y) / 2
+    # Center the scene on the main show floor (path-0)
+    floor_el = next((e for e in elements if e.get('guid') == 'path-0'), None)
+    if floor_el:
+        cx = float(floor_el['x']) + float(floor_el['width']) / 2
+        cz = float(floor_el['y']) + float(floor_el['height']) / 2
+    else:
+        min_x = min(float(e['x'])                    for e in valid)
+        max_x = max(float(e['x']) + float(e['width']) for e in valid)
+        min_y = min(float(e['y'])                    for e in valid)
+        max_y = max(float(e['y']) + float(e['height']) for e in valid)
+        cx = (min_x + max_x) / 2
+        cz = (min_y + max_y) / 2
     M  = 0.3048  # feet → metres
 
     booth_html = []
 
-    # ── Background layers: assign strictly increasing Y (1mm steps) ──────────
+    # ── Pillars ────────────────────────────────────────────────────────────
+    PILLAR_HEIGHT = 20.0
+    PILLAR_COLOR  = '#707070'  # Slightly darker than WALL_COLOR (#9A9A9A)
+
+    def is_pillar(e):
+        try:
+            # User confirmed there are 9 pillars.
+            # They are small black rectangles in the Text layer.
+            # In V5 format, rectangles are often paths with 5 points.
+            w = float(e.get('width', 0))
+            h = float(e.get('height', 0))
+            pts = e.get('positions', [])
+            return (e.get('fill') == '#000000' and
+                    not e.get('exhibitor_ids') and
+                    e.get('tag') == 'path' and
+                    len(pts) == 5 and
+                    w < 10 and h < 10)
+        except (ValueError, TypeError):
+            return False
+
+    # ── Background layers: assign strictly increasing Y (per layer) ──────────
     # Sorting by LAYER_ORDER ensures lower layers get lower Y values.
-    BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text'}
+    BG_LAYERS = {'LightBackground', 'DarkBackground', 'IcongBackground', 'Icons', 'Legend&Logo', 'Text', 'Booths'}
+    # Pillars themselves should still be visible as floor shapes in dollhouse view,
+    # so we include them in the background elements.
     bg_elements = [e for e in valid if e.get('layer') in BG_LAYERS and not e.get('exhibitor_ids')]
 
     def layer_sort_key(e):
@@ -195,13 +232,29 @@ def generate_aframe(elements, exhibitors, categories, output_file):
             return 99
 
     bg_elements.sort(key=layer_sort_key)
-    # Background uses 1mm increments starting at 0.001m
-    BG_Y_BASE = 0.001
-    BG_Y_STEP = 0.001
-    bg_y_map = {id(e): round(BG_Y_BASE + i * BG_Y_STEP, 4) for i, e in enumerate(bg_elements)}
+
+    # Background uses 0.5mm increments per LAYER to keep booths close to ground.
+    BG_Y_BASE = 0.0005
+    BG_Y_STEP = 0.0005
+    bg_y_map = {}
+    current_layer = None
+    layer_idx = -1
+    for e in bg_elements:
+        l = e.get('layer')
+        if l != current_layer:
+            current_layer = l
+            layer_idx += 1
+        bg_y_map[id(e)] = round(BG_Y_BASE + layer_idx * BG_Y_STEP, 4)
+
+    bg_layer_map = {id(e): e.get('layer', '') for e in bg_elements}
     bg_ids   = {id(e) for e in bg_elements}
-    # Booth floors render just above ground level (5mm) to prevent z-fighting with camera/background
-    BOOTH_Y = 0.005
+
+    # Highest Y assigned to any background element
+    MAX_BG_Y = round(BG_Y_BASE + (layer_idx if layer_idx >= 0 else 0) * BG_Y_STEP, 4)
+
+    # Booth floors render above ALL background elements to prevent z-fighting.
+    # 1mm gap is sufficient for A-Frame's default depth buffer.
+    BOOTH_Y = round(MAX_BG_Y + 0.001, 4)
 
     for e in valid:
         x = (float(e['x']) - cx) * M
@@ -213,33 +266,80 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         if fill == 'none': fill = '#888888'
 
         ex_ids_str = e.get('exhibitor_ids', '')
-        if ex_ids_str:
+        guid = e.get('guid', '')
+
+        # ── Structural Pillar (Extruded 3D box) ────────────────────────
+        if is_pillar(e):
+            booth_html.append(
+                f'        <a-box class="structural-pillar" '
+                f'position="{x+w/2:.3f} {PILLAR_HEIGHT/2:.3f} {z+h/2:.3f}" '
+                f'width="{w:.3f}" height="{PILLAR_HEIGHT:.3f}" depth="{h:.3f}" '
+                f'color="{PILLAR_COLOR}"></a-box>'
+            )
+
+        # Special cases that should be treated as booths
+        # even if they don't have exhibitor IDs.
+        special_booth = None
+        if not ex_ids_str:
+            if guid == "bAWE Gaming Hub":
+                special_booth = {'name': 'AWE Gaming Hub', 'location': 'AWE Gaming Hub'}
+            elif guid == "bAWE Gaming Stage":
+                special_booth = {'name': 'AWE Gaming Stage', 'location': 'AWE Gaming Stage'}
+            elif guid == "bS79":
+                special_booth = {'name': 'S79', 'location': 'S79'}
+
+        if ex_ids_str or special_booth:
             # ── Booth element ──────────────────────────────────────────────
-            ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
-            exs    = [exhibitors[i] for i in ex_ids if i in exhibitors]
-            if not exs:
-                continue
-            ex = exs[0]
-            name      = ex.get('name', 'Unknown')
+            if special_booth:
+                name = special_booth['name']
+                location = special_booth['location']
+                logo_url = ''
+                safe_cats = ''
+                safe_desc = ''
+            else:
+                ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
+                exs    = [exhibitors[i] for i in ex_ids if i in exhibitors]
+                if not exs:
+                    continue
+                ex = exs[0]
+                name      = ex.get('name', 'Unknown')
+                logo_url  = (LOGO_BASE + ex['logo']) if ex.get('logo') else ''
+                location  = exhibitor_to_location.get(ex['id'], '')
+
+                # Resolve category names for this exhibitor
+                cat_ids   = ex.get('categories', [])
+                cat_names = ', '.join(categories.get(cid, '') for cid in cat_ids if categories.get(cid))
+                description = (ex.get('description') or '').strip()
+                # Strip HTML tags from description
+                description = re.sub(r'<[^>]+>', ' ', description)  # replace tags with space to preserve word boundaries
+                description = re.sub(r'\s+', ' ', description).strip()  # collapse multiple spaces
+                # Escape for HTML attribute
+                safe_cats = cat_names.replace('"', '&quot;').replace("'", '&#39;')
+                safe_desc = description.replace('"', '&quot;').replace("'", '&#39;')
+
             safe_name = name.replace('"', '&quot;')
-            logo_url  = (LOGO_BASE + ex['logo']) if ex.get('logo') else ''
+            safe_loc  = location.replace('"', '&quot;')
             area      = float(e['width']) * float(e['height'])
 
-            # Resolve category names for this exhibitor
-            cat_ids   = ex.get('categories', [])
-            cat_names = ', '.join(categories.get(cid, '') for cid in cat_ids if categories.get(cid))
-            description = (ex.get('description') or '').strip()
-            # Strip HTML tags from description
-            description = re.sub(r'<[^>]+>', ' ', description)  # replace tags with space to preserve word boundaries
-            description = re.sub(r'\s+', ' ', description).strip()  # collapse multiple spaces
-            # Escape for HTML attribute
-            safe_cats = cat_names.replace('"', '&quot;').replace("'", '&#39;')
-            safe_desc = description.replace('"', '&quot;').replace("'", '&#39;')
             # AABB in world metres (used by proximity detector)
             aabb_min_x = round(x, 3)
             aabb_min_z = round(z, 3)
             aabb_max_x = round(x + w, 3)
             aabb_max_z = round(z + h, 3)
+
+            #Fix child booth y
+            this_booth_y = BOOTH_Y
+            if location.upper() in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7', 'LBE3']:
+                this_booth_y += 0.02
+
+            # GH1-GH17 booths sit on top of Gaming Hub, so we need to raise them slightly to avoid z-fighting.
+            gh_match = re.match(r'^GH([1-9]|1[0-7])$', location.upper())
+            if gh_match:
+                this_booth_y += 0.02
+
+            # Fix z-fighting by giving Gaming Stage a slightly higher Y
+            if guid == "bAWE Gaming Stage":
+                this_booth_y += 0.005
 
             if area < 400:
                 # Small booth: floor space + table block + info wall
@@ -250,45 +350,58 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}">'
                 )
                 booth_html.append(
-                    f'          <a-plane position="{x+w/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-plane position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2+h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} 0.41 {z+h/2:.3f}" '
+                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+0.4:.4f} {z+h/2:.3f}" '
                     f'width="{w*0.6:.3f}" height="0.8" depth="{h*0.4:.3f}" color="#4CC3D9"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} 1.25 {z-0.01:.3f}" '
+                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+1.25:.4f} {z-0.01:.3f}" '
                     f'width="{w:.3f}" height="2.5" color="#FFF" rotation="0 0 0">'
                 )
                 booth_html.append(
                     f'            <a-text value="{safe_name}" align="center" color="#000" '
                     f'width="2.5" position="0 0.5 0.05"></a-text>'
                 )
+                if location:
+                    booth_html.append(
+                        f'            <a-text value="{safe_loc}" align="center" color="#000" '
+                        f'width="2.0" position="0 0.8 0.05"></a-text>'
+                    )
                 if logo_url:
                     booth_html.append(
                         f'            <a-image src="{logo_url}" width="0.8" '
                         f'position="0 -0.2 0.05" aspect-ratio></a-image>'
                     )
                 booth_html.append('          </a-plane>')
+                if location:
+                    wrap_count = max(1, len(safe_loc))
+                    booth_html.append(
+                        f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
+                        f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {this_booth_y+0.05:.4f} {z+h/2:.3f}" '
+                        f'rotation="-90 0 0" visible="false"></a-text>'
+                    )
                 booth_html.append('        </a-entity>')
             else:
                 # Large booth: colored floor
@@ -299,40 +412,53 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}">'
                 )
                 booth_html.append(
-                    f'          <a-plane position="{x+w/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-plane position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2+h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} 2.5 {z+h/2:.3f}">'
+                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+2.5:.4f} {z+h/2:.3f}">'
                 )
                 booth_html.append(
                     f'            <a-text value="{safe_name}" align="center" color="#000" '
                     f'width="6" position="0 0.5 0.05"></a-text>'
                 )
+                if location:
+                    booth_html.append(
+                        f'            <a-text value="{safe_loc}" align="center" color="#000" '
+                        f'width="5" position="0 1.2 0.05"></a-text>'
+                    )
                 if logo_url:
                     booth_html.append(
                         f'            <a-image src="{logo_url}" width="1.5" '
                         f'position="0 -0.5 0.05" aspect-ratio></a-image>'
                     )
                 booth_html.append('          </a-entity>')
+                if location:
+                    wrap_count = max(1, len(safe_loc))
+                    booth_html.append(
+                        f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
+                        f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {this_booth_y+0.05:.4f} {z+h/2:.3f}" '
+                        f'rotation="-90 0 0" visible="false"></a-text>'
+                    )
                 booth_html.append('        </a-entity>')
 
         elif id(e) in bg_ids:
@@ -355,15 +481,16 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 # Escape the JSON for use inside an HTML attribute
                 pts_attr = pts_str.replace('"', '&quot;')
                 cells_attr = cells_str.replace('"', '&quot;')
+                extra_class = ' class="structural-pillar-floor"' if is_pillar(e) else ''
                 booth_html.append(
-                    f'        <a-entity id="{guid}" '
+                    f'        <a-entity id="{guid}"{extra_class} data-layer="{bg_layer_map[id(e)]}" '
                     f'floor-polygon="points: {pts_attr}; cells: {cells_attr}; color: {fill}; y: {layer_y}">'
                     f'</a-entity>'
                 )
             else:
                 # Rect-based background element
                 booth_html.append(
-                    f'        <a-plane position="{x+w/2:.3f} {layer_y} {z+h/2:.3f}" '
+                    f'        <a-plane data-layer="{bg_layer_map[id(e)]}" position="{x+w/2:.3f} {layer_y} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" '
                     f'color="{fill}"></a-plane>'
                 )
@@ -414,6 +541,17 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         wall_html.append('        </a-entity>')
 
     inner = '\n'.join(booth_html) + ('\n' + '\n'.join(wall_html) if wall_html else '')
+    hud_inner = inner.replace('class="booth-furniture"', 'class="hud-furniture" visible="false"')
+    hud_inner = hud_inner.replace('class="booth-trigger"', 'class="hud-booth-trigger"')
+    hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar" visible="false"')
+    hud_inner = hud_inner.replace('id="outer-walls"', 'id="outer-walls" visible="false"')
+    # Remove Text, Icons, and Legend&Logo layers from HUD to keep it clean
+    for layer in ['Text', 'Icons', 'Legend&Logo']:
+        hud_inner = re.sub(rf'<a-(entity|plane)[^>]*data-layer="{layer}"[^>]*>.*?</a-\1>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+
+    hud_inner = re.sub(r'<a-text.*?</a-text>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-image.*?</a-image>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'id="([^"]+)"', r'id="hud-\1"', hud_inner)
 
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -477,6 +615,90 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         }
       });
 
+      AFRAME.registerComponent('stencil-masked', {
+        schema: {
+          stencilRef: { type: 'number', default: 1 }
+        },
+        init: function () {
+          this.el.addEventListener('object3dset', this.applyMask.bind(this));
+          this.applyMask();
+        },
+        applyMask: function () {
+          var stencilRef = this.data.stencilRef;
+          this.el.object3D.traverse(function (obj) {
+            if (obj.material) {
+              // Clone materials to avoid affecting shared materials in the main scene
+              if (Array.isArray(obj.material)) {
+                obj.material = obj.material.map(function(m) {
+                  var m2 = m.clone();
+                  m2.stencilWrite = true;
+                  m2.stencilRef = stencilRef;
+                  m2.stencilFunc = THREE.EqualStencilFunc;
+                  return m2;
+                });
+              } else {
+                var m = obj.material.clone();
+                m.stencilWrite = true;
+                m.stencilRef = stencilRef;
+                m.stencilFunc = THREE.EqualStencilFunc;
+                obj.material = m;
+              }
+            }
+          });
+        }
+      });
+
+      AFRAME.registerComponent('rounded-rect', {
+        schema: {
+          width: { type: 'number', default: 1 },
+          height: { type: 'number', default: 1 },
+          radius: { type: 'number', default: 0.1 },
+          color: { type: 'color', default: '#FFF' },
+          opacity: { type: 'number', default: 1 },
+          stencilRef: { type: 'number', default: 0 }
+        },
+        init: function () {
+          var data = this.data;
+          var shape = new THREE.Shape();
+          var x = -data.width / 2;
+          var y = -data.height / 2;
+          var w = data.width;
+          var h = data.height;
+          var r = data.radius;
+
+          shape.moveTo(x, y + r);
+          shape.lineTo(x, y + h - r);
+          shape.quadraticCurveTo(x, y + h, x + r, y + h);
+          shape.lineTo(x + w - r, y + h);
+          shape.quadraticCurveTo(x + w, y + h, x + w, y + h - r);
+          shape.lineTo(x + w, y + r);
+          shape.quadraticCurveTo(x + w, y, x + w - r, y);
+          shape.lineTo(x + r, y);
+          shape.quadraticCurveTo(x, y, x, y + r);
+
+          var geometry = new THREE.ShapeGeometry(shape);
+          var matProps = {
+            color: new THREE.Color(data.color),
+            transparent: data.opacity < 1,
+            opacity: data.opacity,
+            side: THREE.DoubleSide
+          };
+
+          if (data.stencilRef > 0) {
+            matProps.stencilWrite = true;
+            matProps.stencilRef = data.stencilRef;
+            matProps.stencilFunc = THREE.AlwaysStencilFunc;
+            matProps.stencilZPass = THREE.ReplaceStencilOp;
+            matProps.colorWrite = false; // Mask is invisible, only writes to stencil
+            matProps.depthWrite = false;
+          }
+
+          var material = new THREE.MeshBasicMaterial(matProps);
+          var mesh = new THREE.Mesh(geometry, material);
+          this.el.setObject3D('mesh', mesh);
+        }
+      });
+
       var dollhouseMode = false;
       var dollhouseScale = 0.05;
       var SCALE_MIN = 0.01;
@@ -508,6 +730,8 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           window.addEventListener('keydown', function(e) {
             var walls = document.querySelector('#outer-walls');
             var furniture = document.querySelectorAll('.booth-furniture');
+            var locs = document.querySelectorAll('.dollhouse-location');
+            var pillars = document.querySelectorAll('.structural-pillar');
             if (e.key === '1') {
               dollhouseMode = false;
               scene.setAttribute('scale',    '1 1 1');
@@ -515,6 +739,8 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'true');
               furniture.forEach(function(f) { f.setAttribute('visible', 'true'); });
+              locs.forEach(function(l) { l.setAttribute('visible', 'false'); });
+              pillars.forEach(function(p) { p.setAttribute('visible', 'true'); });
             } else if (e.key === '2') {
               dollhouseMode = true;
               scene.setAttribute('scale',    dollhouseScale + ' ' + dollhouseScale + ' ' + dollhouseScale);
@@ -522,6 +748,8 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'false');
               furniture.forEach(function(f) { f.setAttribute('visible', 'false'); });
+              locs.forEach(function(l) { l.setAttribute('visible', 'true'); });
+              pillars.forEach(function(p) { p.setAttribute('visible', 'false'); });
             }
           });
 
@@ -548,13 +776,53 @@ def generate_aframe(elements, exhibitors, categories, output_file):
         }
       });
 
+      AFRAME.registerComponent('hud-manager', {
+        init: function () {
+          this.camera = document.querySelector('a-camera');
+          this.rotator = document.querySelector('#hud-rotator');
+          this.content = document.querySelector('#hud-content');
+          this.marker = document.querySelector('#hud-marker');
+          this.visible = true;
+
+          window.addEventListener('keydown', function(e) {
+            if (e.key.toLowerCase() === 'm') {
+              this.visible = !this.visible;
+            }
+          }.bind(this));
+        },
+        tick: function () {
+          var shouldBeVisible = this.visible && !dollhouseMode;
+          if (this.el.getAttribute('visible') !== shouldBeVisible) {
+            this.el.setAttribute('visible', shouldBeVisible);
+          }
+          if (!shouldBeVisible) return;
+
+          var worldPos = new THREE.Vector3();
+          this.camera.object3D.getWorldPosition(worldPos);
+          var worldQuat = new THREE.Quaternion();
+          this.camera.object3D.getWorldQuaternion(worldQuat);
+          var worldEuler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
+
+          // Head-locked HUD: stays in the same place on the screen.
+          // To keep the map "North-up", we counter-rotate the rotator by the camera's yaw.
+          this.rotator.object3D.rotation.y = -worldEuler.y;
+
+          // The player is at the center of the HUD.
+          // We shift the map content by the negative of the camera position.
+          this.content.object3D.position.set(-worldPos.x, 0, -worldPos.z);
+
+          // Marker stays at the center of the HUD
+          this.marker.object3D.position.set(0, 5, 0);
+        }
+      });
+
       AFRAME.registerComponent('aspect-ratio', {
         init: function () {
           this.el.addEventListener('materialtextureloaded', function(e) {
             var img   = e.detail.texture.image;
             var ratio = img.height / img.width;
-            var width = this.getAttribute('width');
-            this.setAttribute('height', width * ratio);
+            var width = this.el.getAttribute('width');
+            this.el.setAttribute('height', width * ratio);
           }.bind(this));
         }
       });
@@ -771,10 +1039,24 @@ def generate_aframe(elements, exhibitors, categories, output_file):
     <a-scene scale-switcher>
       <a-sky color="#ECECEC"></a-sky>
 
-      <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
+        <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
         <a-entity camera position="0 1.753 0" look-controls></a-entity>
         <a-entity oculus-touch-controls="hand: left" vr-controller-sprint></a-entity>
         <a-entity oculus-touch-controls="hand: right"></a-entity>
+        <a-camera user-height="0" position="0 1.753 0">
+          <!-- HUD Map -->
+          <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">
+            <a-entity id="hud-map-bg" rounded-rect="width: 167; height: 167; radius: 3.6; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
+            <a-entity id="hud-mask" rounded-rect="width: 167; height: 167; radius: 3.6; stencilRef: 1" rotation="-90 0 0" position="0 -0.5 0"></a-entity>
+            <!-- hud-rotator does not need rotation because floor-polygon children are already in XZ plane (facing camera) -->
+            <a-entity id="hud-rotator" stencil-masked="stencilRef: 1">
+              <a-entity id="hud-content">
+                """ + hud_inner + """
+              </a-entity>
+            </a-entity>
+            <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
+          </a-entity>
+        </a-camera>
       </a-entity>
 
       <a-entity id="expo-scene">
@@ -786,7 +1068,8 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 color:#fff;padding:10px 14px;font-family:sans-serif;border-radius:6px;
                 font-size:14px;line-height:1.6;">
       <b>AWE USA 2026 VR Map</b><br>
-      Press <kbd>1</kbd> &mdash; 1:1 scale &nbsp;|&nbsp; Press <kbd>2</kbd> &mdash; Dollhouse
+      Press <kbd>1</kbd> &mdash; 1:1 scale &nbsp;|&nbsp; Press <kbd>2</kbd> &mdash; Dollhouse<br>
+      Press <kbd>M</kbd> &mdash; Toggle HUD Map
     </div>
   </body>
 </html>
@@ -807,16 +1090,21 @@ def main():
 
     print('\n[2/3] Parsing SVG and exhibitor data...')
     elements              = parse_svg(BASE_DIR / 'fp.svg.js')
-    exhibitors, categories = parse_metadata(BASE_DIR / 'data.js')
+    exhibitors, categories, ex_to_loc = parse_metadata(BASE_DIR / 'data.js')
     print(f'  SVG elements: {len(elements)}, Exhibitors: {len(exhibitors)}, Categories: {len(categories)}')
 
     # Save parsed JSON alongside the HTML for debugging / inspection
     parsed_out = BASE_DIR / 'parsed_data.json'
     with open(parsed_out, 'w') as f:
-        json.dump(elements, f, indent=2)
+        json.dump({
+            'elements': elements,
+            'exhibitors': exhibitors,
+            'categories': categories,
+            'ex_to_loc': ex_to_loc
+        }, f, indent=2)
 
     print('\n[3/3] Generating A-Frame scene...')
-    generate_aframe(elements, exhibitors, categories, BASE_DIR / 'index.html')
+    generate_aframe(elements, exhibitors, categories, ex_to_loc, BASE_DIR / 'index.html')
 
     print('\nDone.')
 

@@ -806,7 +806,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           this.rotator = document.querySelector('#hud-rotator');
           this.content = document.querySelector('#hud-content');
           this.marker = document.querySelector('#hud-marker');
-          this.visible = true;
+          this.visible = false;
 
           this.worldPos = new THREE.Vector3();
           this.worldQuat = new THREE.Quaternion();
@@ -1093,7 +1093,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
         <a-entity camera position="0 1.753 0" look-controls>
           <!-- HUD Map -->
-          <a-entity id="hud-map" position="-0.20 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">
+          <a-entity id="hud-map" position="0 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="false">
             <a-entity id="hud-map-bg" rounded-rect="width: 167; height: 167; radius: 3.6; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
             <a-entity id="hud-mask" rounded-rect="width: 167; height: 167; radius: 3.6; stencilRef: 1" rotation="-90 0 0" position="0 -0.5 0"></a-entity>
             <!-- hud-rotator does not need rotation because floor-polygon children are already in XZ plane (facing camera) -->

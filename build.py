@@ -560,6 +560,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     <meta name="viewport" content="width=device-width">
     <title>AWE USA 2026 VR Map</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
     <script>
       // floor-polygon: renders an arbitrary flat polygon as a Three.js mesh
       // at a precise world-space Y, completely avoiding z-fighting.
@@ -704,6 +705,23 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
       var SCALE_MAX = 0.30;
       var SCALE_STEP = 0.005;
 
+      var NORMAL_ACCEL = 65;   // A-Frame default wasd-controls acceleration
+      var SPRINT_ACCEL = 260;  // 4x sprint
+
+      window.setSprint = function(enabled) {
+        var rig = document.querySelector('#camera-rig');
+        if (rig) {
+          rig.setAttribute('movement-controls', 'acceleration', enabled ? SPRINT_ACCEL : NORMAL_ACCEL);
+        }
+      };
+
+      AFRAME.registerComponent('vr-controller-sprint', {
+        init: function() {
+          this.el.addEventListener('triggerdown', function() { window.setSprint(true); });
+          this.el.addEventListener('triggerup',   function() { window.setSprint(false); });
+        }
+      });
+
       AFRAME.registerComponent('scale-switcher', {
         init: function () {
           var scene  = document.querySelector('#expo-scene');
@@ -745,18 +763,14 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           }, { passive: false });
 
           // Shift-sprint: hold Shift to move 4x faster in 1:1 mode
-          var NORMAL_ACCEL = 65;   // A-Frame default wasd-controls acceleration
-          var SPRINT_ACCEL = 260;  // 4x sprint
           window.addEventListener('keydown', function(e) {
             if (e.key === 'Shift' && !dollhouseMode) {
-              var cam = document.querySelector('a-camera');
-              if (cam) cam.setAttribute('wasd-controls', 'acceleration', SPRINT_ACCEL);
+              window.setSprint(true);
             }
           });
           window.addEventListener('keyup', function(e) {
             if (e.key === 'Shift') {
-              var cam = document.querySelector('a-camera');
-              if (cam) cam.setAttribute('wasd-controls', 'acceleration', NORMAL_ACCEL);
+              window.setSprint(false);
             }
           });
         }
@@ -977,7 +991,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
       document.addEventListener('DOMContentLoaded', function() {
         var scene = document.querySelector('a-scene');
         function startProximityLoop() {
-          var camEl = document.querySelector('a-camera');
+          var camEl = document.querySelector('[camera]');
           if (!camEl || !camEl.object3D) {
             setTimeout(startProximityLoop, 200);
             return;
@@ -1025,7 +1039,10 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     <a-scene scale-switcher>
       <a-sky color="#ECECEC"></a-sky>
 
-      <a-entity id="camera-rig" position="0 0 0">
+        <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
+        <a-entity camera position="0 1.753 0" look-controls></a-entity>
+        <a-entity oculus-touch-controls="hand: left" vr-controller-sprint></a-entity>
+        <a-entity oculus-touch-controls="hand: right"></a-entity>
         <a-camera user-height="0" position="0 1.753 0">
           <!-- HUD Map -->
           <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">

@@ -172,13 +172,18 @@ def parse_metadata(data_file):
 def generate_aframe(elements, exhibitors, categories, output_file):
     valid = [e for e in elements if e['x'] and e['y'] and e['width'] and e['height']]
 
-    min_x = min(float(e['x'])                    for e in valid)
-    max_x = max(float(e['x']) + float(e['width']) for e in valid)
-    min_y = min(float(e['y'])                    for e in valid)
-    max_y = max(float(e['y']) + float(e['height']) for e in valid)
-
-    cx = (min_x + max_x) / 2
-    cz = (min_y + max_y) / 2
+    # Center the scene on the main show floor (path-0)
+    floor_el = next((e for e in elements if e.get('guid') == 'path-0'), None)
+    if floor_el:
+        cx = float(floor_el['x']) + float(floor_el['width']) / 2
+        cz = float(floor_el['y']) + float(floor_el['height']) / 2
+    else:
+        min_x = min(float(e['x'])                    for e in valid)
+        max_x = max(float(e['x']) + float(e['width']) for e in valid)
+        min_y = min(float(e['y'])                    for e in valid)
+        max_y = max(float(e['y']) + float(e['height']) for e in valid)
+        cx = (min_x + max_x) / 2
+        cz = (min_y + max_y) / 2
     M  = 0.3048  # feet → metres
 
     booth_html = []
@@ -851,14 +856,14 @@ def generate_aframe(elements, exhibitors, categories, output_file):
       <a-entity id="camera-rig" position="0 0 0">
         <a-camera user-height="0" position="0 1.753 0">
           <!-- HUD Map -->
-          <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.001 0.001 0.001" hud-manager visible="true">
-            <a-entity id="hud-map-bg" rounded-rect="width: 250; height: 250; radius: 5.4; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
+          <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">
+            <a-entity id="hud-map-bg" rounded-rect="width: 167; height: 167; radius: 3.6; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
             <a-entity id="hud-rotator">
               <a-entity id="hud-content">
                 """ + hud_inner + """
               </a-entity>
             </a-entity>
-            <a-sphere id="hud-marker" radius="2.7" color="#FF3333" position="0 20 0"></a-sphere>
+            <a-sphere id="hud-marker" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
           </a-entity>
         </a-camera>
       </a-entity>

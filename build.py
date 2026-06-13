@@ -305,6 +305,11 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             aabb_max_x = round(x + w, 3)
             aabb_max_z = round(z + h, 3)
 
+            # NIPA1-NIPA7 booths sit on top of booth 1111, so we need to raise them slightly to avoid z-fighting.
+            this_booth_y = BOOTH_Y
+            if location in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7']:
+                this_booth_y += 0.001
+
             if area < 400:
                 # Small booth: floor space + table block + info wall
                 booth_html.append(
@@ -314,33 +319,33 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}">'
                 )
                 booth_html.append(
-                    f'          <a-plane position="{x+w/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-plane position="{x+w/2:.3f} {this_booth_y} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2+h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} {BOOTH_Y+0.4:.3f} {z+h/2:.3f}" '
+                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+0.4:.3f} {z+h/2:.3f}" '
                     f'width="{w*0.6:.3f}" height="0.8" depth="{h*0.4:.3f}" color="#4CC3D9"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} {BOOTH_Y+1.25:.3f} {z-0.01:.3f}" '
+                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+1.25:.3f} {z-0.01:.3f}" '
                     f'width="{w:.3f}" height="2.5" color="#FFF" rotation="0 0 0">'
                 )
                 booth_html.append(
@@ -363,7 +368,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
-                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {BOOTH_Y+0.05:.3f} {z+h/2:.3f}" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {this_booth_y+0.05:.3f} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')
@@ -376,29 +381,29 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'data-maxx="{aabb_max_x}" data-maxz="{aabb_max_z}">'
                 )
                 booth_html.append(
-                    f'          <a-plane position="{x+w/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-plane position="{x+w/2:.3f} {this_booth_y} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2+h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {BOOTH_Y} {z+h/2-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {BOOTH_Y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} {BOOTH_Y+2.5:.3f} {z+h/2:.3f}">'
+                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+2.5:.3f} {z+h/2:.3f}">'
                 )
                 booth_html.append(
                     f'            <a-text value="{safe_name}" align="center" color="#000" '
@@ -420,7 +425,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
-                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {BOOTH_Y+0.05:.3f} {z+h/2:.3f}" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {this_booth_y+0.05:.3f} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')

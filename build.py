@@ -266,6 +266,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         if fill == 'none': fill = '#888888'
 
         ex_ids_str = e.get('exhibitor_ids', '')
+        guid = e.get('guid', '')
+
         # ── Structural Pillar (Extruded 3D box) ────────────────────────
         if is_pillar(e):
             booth_html.append(
@@ -275,30 +277,48 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 f'color="{PILLAR_COLOR}"></a-box>'
             )
 
-        if ex_ids_str:
-            # ── Booth element ──────────────────────────────────────────────
-            ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
-            exs    = [exhibitors[i] for i in ex_ids if i in exhibitors]
-            if not exs:
-                continue
-            ex = exs[0]
-            name      = ex.get('name', 'Unknown')
-            safe_name = name.replace('"', '&quot;')
-            logo_url  = (LOGO_BASE + ex['logo']) if ex.get('logo') else ''
-            area      = float(e['width']) * float(e['height'])
-            location  = exhibitor_to_location.get(ex['id'], '')
-            safe_loc  = location.replace('"', '&quot;')
+        # AWE Gaming Stage and Gaming Hub are special cases that should be treated as booths
+        # even if they don't have exhibitor IDs.
+        special_booth = None
+        if not ex_ids_str:
+            if guid == "bAWE Gaming Hub":
+                special_booth = {'name': 'AWE Gaming Hub', 'location': 'AWE Gaming Hub'}
+            elif guid == "bAWE Gaming Stage":
+                special_booth = {'name': 'AWE Gaming Stage', 'location': 'AWE Gaming Stage'}
 
-            # Resolve category names for this exhibitor
-            cat_ids   = ex.get('categories', [])
-            cat_names = ', '.join(categories.get(cid, '') for cid in cat_ids if categories.get(cid))
-            description = (ex.get('description') or '').strip()
-            # Strip HTML tags from description
-            description = re.sub(r'<[^>]+>', ' ', description)  # replace tags with space to preserve word boundaries
-            description = re.sub(r'\s+', ' ', description).strip()  # collapse multiple spaces
-            # Escape for HTML attribute
-            safe_cats = cat_names.replace('"', '&quot;').replace("'", '&#39;')
-            safe_desc = description.replace('"', '&quot;').replace("'", '&#39;')
+        if ex_ids_str or special_booth:
+            # ── Booth element ──────────────────────────────────────────────
+            if special_booth:
+                name = special_booth['name']
+                location = special_booth['location']
+                logo_url = ''
+                safe_cats = ''
+                safe_desc = ''
+            else:
+                ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
+                exs    = [exhibitors[i] for i in ex_ids if i in exhibitors]
+                if not exs:
+                    continue
+                ex = exs[0]
+                name      = ex.get('name', 'Unknown')
+                logo_url  = (LOGO_BASE + ex['logo']) if ex.get('logo') else ''
+                location  = exhibitor_to_location.get(ex['id'], '')
+
+                # Resolve category names for this exhibitor
+                cat_ids   = ex.get('categories', [])
+                cat_names = ', '.join(categories.get(cid, '') for cid in cat_ids if categories.get(cid))
+                description = (ex.get('description') or '').strip()
+                # Strip HTML tags from description
+                description = re.sub(r'<[^>]+>', ' ', description)  # replace tags with space to preserve word boundaries
+                description = re.sub(r'\s+', ' ', description).strip()  # collapse multiple spaces
+                # Escape for HTML attribute
+                safe_cats = cat_names.replace('"', '&quot;').replace("'", '&#39;')
+                safe_desc = description.replace('"', '&quot;').replace("'", '&#39;')
+
+            safe_name = name.replace('"', '&quot;')
+            safe_loc  = location.replace('"', '&quot;')
+            area      = float(e['width']) * float(e['height'])
+
             # AABB in world metres (used by proximity detector)
             aabb_min_x = round(x, 3)
             aabb_min_z = round(z, 3)
@@ -309,6 +329,9 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             this_booth_y = BOOTH_Y
             if location.upper() in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7']:
                 this_booth_y += 0.02
+            # Fix z-fighting by giving Gaming Stage a slightly higher Y
+            if guid == "bAWE Gaming Stage":
+                this_booth_y += 0.005
 
             if area < 400:
                 # Small booth: floor space + table block + info wall

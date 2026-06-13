@@ -285,6 +285,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 special_booth = {'name': 'AWE Gaming Hub', 'location': 'AWE Gaming Hub'}
             elif guid == "bAWE Gaming Stage":
                 special_booth = {'name': 'AWE Gaming Stage', 'location': 'AWE Gaming Stage'}
+            elif guid == "bS79":
+                special_booth = {'name': 'S79', 'location': 'S79'}
 
         if ex_ids_str or special_booth:
             # ── Booth element ──────────────────────────────────────────────

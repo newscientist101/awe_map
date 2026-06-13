@@ -240,7 +240,11 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     bg_y_map = {}
     for e in bg_elements:
         layer_idx = layer_sort_key(e)
-        bg_y_map[id(e)] = round(BG_Y_BASE + layer_idx * BG_Y_STEP, 4)
+        y = BG_Y_BASE + layer_idx * BG_Y_STEP
+        # Raise symbols and borders by 1mm (0.001m) as requested
+        if e.get('layer') in ['Icons', 'Text'] or e.get('fill') in ['#000000', '#48484A', '#D6D6D6', '#FFFFFF']:
+            y += 0.001
+        bg_y_map[id(e)] = round(y, 4)
 
     bg_layer_map = {id(e): e.get('layer', '') for e in bg_elements}
     bg_ids   = {id(e) for e in bg_elements}
@@ -339,21 +343,22 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
+                # Raised by 1mm to avoid z-fighting with the floor plane
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2+h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y+0.001:.4f} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y+0.001:.4f} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y+0.001:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y+0.001:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
@@ -401,21 +406,22 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
+                # Raised by 1mm to avoid z-fighting with the floor plane
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2+h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y+0.001:.4f} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2:.3f} {this_booth_y} {z+h/2-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y+0.001:.4f} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y+0.001:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y} {z+h/2:.3f}" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y+0.001:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(

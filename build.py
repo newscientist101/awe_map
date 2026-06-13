@@ -210,8 +210,12 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     BG_Y_STEP = 0.001
     bg_y_map = {id(e): round(BG_Y_BASE + i * BG_Y_STEP, 4) for i, e in enumerate(bg_elements)}
     bg_ids   = {id(e) for e in bg_elements}
-    # Booth floors render just above ground level (5mm) to prevent z-fighting with camera/background
-    BOOTH_Y = 0.005
+
+    # Highest Y assigned to any background element
+    MAX_BG_Y = BG_Y_BASE + len(bg_elements) * BG_Y_STEP
+
+    # Booth floors render above ALL background elements to prevent z-fighting with logo/legend
+    BOOTH_Y = round(MAX_BG_Y + 0.01, 4)
 
     for e in valid:
         x = (float(e['x']) - cx) * M
@@ -307,10 +311,11 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     )
                 booth_html.append('          </a-plane>')
                 if location:
+                    # Using Roboto MSDF font as requested
                     booth_html.append(
-                        f'          <a-text class="dollhouse-location" value="{location}" align="center" color="#FFF" '
-                        f'font="https://cdn.aframe.io/fonts/Inter-Bold.json" shader="msdf" '
-                        f'width="{min(w, h)*1.5:.3f}" position="{x+w/2:.3f} {BOOTH_Y+0.01} {z+h/2:.3f}" '
+                        f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
+                        f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="false" '
+                        f'width="4" position="{x+w/2:.3f} {BOOTH_Y+0.5} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')
@@ -363,10 +368,11 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     )
                 booth_html.append('          </a-entity>')
                 if location:
+                    # Using Roboto MSDF font as requested
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
-                        f'font="https://cdn.aframe.io/fonts/Inter-Bold.json" shader="msdf" '
-                        f'width="{min(w, h)*1.5:.3f}" position="{x+w/2:.3f} {BOOTH_Y+0.01} {z+h/2:.3f}" '
+                        f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="false" '
+                        f'width="4" position="{x+w/2:.3f} {BOOTH_Y+0.5} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')
@@ -578,8 +584,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           this.el.addEventListener('materialtextureloaded', function(e) {
             var img   = e.detail.texture.image;
             var ratio = img.height / img.width;
-            var width = this.getAttribute('width');
-            this.setAttribute('height', width * ratio);
+            var width = this.el.getAttribute('width');
+            this.el.setAttribute('height', width * ratio);
           }.bind(this));
         }
       });

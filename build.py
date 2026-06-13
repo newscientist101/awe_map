@@ -331,6 +331,12 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             this_booth_y = BOOTH_Y
             if location.upper() in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7']:
                 this_booth_y += 0.02
+
+            # GH1-GH17 booths sit on top of Gaming Hub, so we need to raise them slightly to avoid z-fighting.
+            gh_match = re.match(r'^GH([1-9]|1[0-7])$', location.upper())
+            if gh_match:
+                this_booth_y += 0.02
+
             # Fix z-fighting by giving Gaming Stage a slightly higher Y
             if guid == "bAWE Gaming Stage":
                 this_booth_y += 0.005

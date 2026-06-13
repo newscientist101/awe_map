@@ -818,9 +818,15 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             }
           }.bind(this);
           window.addEventListener('keydown', this.onKeydown);
+
+          this.toggleHUD = function() {
+            this.visible = !this.visible;
+          }.bind(this);
+          this.el.addEventListener('toggle-hud', this.toggleHUD);
         },
         remove: function () {
           window.removeEventListener('keydown', this.onKeydown);
+          this.el.removeEventListener('toggle-hud', this.toggleHUD);
         },
         tick: function () {
           var shouldBeVisible = this.visible && !dollhouseMode;
@@ -849,6 +855,15 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
 
           // Marker stays at the center of the HUD
           this.marker.object3D.position.set(0, 5, 0);
+        }
+      });
+
+      AFRAME.registerComponent('vr-hud-toggle', {
+        init: function() {
+          this.el.addEventListener('abuttondown', function() {
+            var hud = document.querySelector('#hud-map');
+            if (hud) hud.emit('toggle-hud');
+          });
         }
       });
 
@@ -1106,7 +1121,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           </a-entity>
         </a-entity>
         <a-entity oculus-touch-controls="hand: left" vr-controller-sprint></a-entity>
-        <a-entity oculus-touch-controls="hand: right"></a-entity>
+        <a-entity oculus-touch-controls="hand: right" vr-hud-toggle></a-entity>
       </a-entity>
 
       <a-entity id="expo-scene">

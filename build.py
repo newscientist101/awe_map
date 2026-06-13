@@ -858,7 +858,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                 """ + hud_inner + """
               </a-entity>
             </a-entity>
-            <a-sphere id="hud-marker" radius="5.4" color="#FF3333" position="0 20 0"></a-sphere>
+            <a-sphere id="hud-marker" radius="2.7" color="#FF3333" position="0 20 0"></a-sphere>
           </a-entity>
         </a-camera>
       </a-entity>

@@ -311,11 +311,10 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     )
                 booth_html.append('          </a-plane>')
                 if location:
-                    # Using Roboto MSDF font as requested
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="false" '
-                        f'width="4" position="{x+w/2:.3f} {BOOTH_Y+0.5} {z+h/2:.3f}" '
+                        f'width="{w*0.8:.3f}" position="{x+w/2:.3f} {BOOTH_Y+0.05:.3f} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')
@@ -368,11 +367,10 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     )
                 booth_html.append('          </a-entity>')
                 if location:
-                    # Using Roboto MSDF font as requested
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="false" '
-                        f'width="4" position="{x+w/2:.3f} {BOOTH_Y+0.5} {z+h/2:.3f}" '
+                        f'width="{w*0.8:.3f}" position="{x+w/2:.3f} {BOOTH_Y+0.05:.3f} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')

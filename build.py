@@ -311,7 +311,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     )
                 booth_html.append('          </a-plane>')
                 if location:
-                    wrap_count = max(1, len(safe_loc))
+                    # wrap-count = chars per line. len(loc) is too tight; add margin to prevent wrapping.
+                    wrap_count = max(1, len(safe_loc)) + 10
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
@@ -368,7 +369,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     )
                 booth_html.append('          </a-entity>')
                 if location:
-                    wrap_count = max(1, len(safe_loc))
+                    # wrap-count = chars per line. len(loc) is too tight; add margin to prevent wrapping.
+                    wrap_count = max(1, len(safe_loc)) + 10
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '

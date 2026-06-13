@@ -279,6 +279,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         if fill == 'none': fill = '#888888'
 
         ex_ids_str = e.get('exhibitor_ids', '')
+        guid = e.get('guid', '')
+
         # ── Structural Pillar (Extruded 3D box) ────────────────────────
         if is_pillar(e):
             booth_html.append(
@@ -289,30 +291,50 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 f'color="{PILLAR_COLOR}"></a-box>'
             )
 
-        if ex_ids_str:
-            # ── Booth element ──────────────────────────────────────────────
-            ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
-            exs    = [exhibitors[i] for i in ex_ids if i in exhibitors]
-            if not exs:
-                continue
-            ex = exs[0]
-            name      = ex.get('name', 'Unknown')
-            safe_name = name.replace('"', '&quot;')
-            logo_url  = (LOGO_BASE + ex['logo']) if ex.get('logo') else ''
-            area      = float(e['width']) * float(e['height'])
-            location  = exhibitor_to_location.get(ex['id'], '')
-            safe_loc  = location.replace('"', '&quot;')
+        # Special cases that should be treated as booths
+        # even if they don't have exhibitor IDs.
+        special_booth = None
+        if not ex_ids_str:
+            if guid == "bAWE Gaming Hub":
+                special_booth = {'name': 'AWE Gaming Hub', 'location': 'AWE Gaming Hub'}
+            elif guid == "bAWE Gaming Stage":
+                special_booth = {'name': 'AWE Gaming Stage', 'location': 'AWE Gaming Stage'}
+            elif guid == "bS79":
+                special_booth = {'name': 'S79', 'location': 'S79'}
 
-            # Resolve category names for this exhibitor
-            cat_ids   = ex.get('categories', [])
-            cat_names = ', '.join(categories.get(cid, '') for cid in cat_ids if categories.get(cid))
-            description = (ex.get('description') or '').strip()
-            # Strip HTML tags from description
-            description = re.sub(r'<[^>]+>', ' ', description)  # replace tags with space to preserve word boundaries
-            description = re.sub(r'\s+', ' ', description).strip()  # collapse multiple spaces
-            # Escape for HTML attribute
-            safe_cats = cat_names.replace('"', '&quot;').replace("'", '&#39;')
-            safe_desc = description.replace('"', '&quot;').replace("'", '&#39;')
+        if ex_ids_str or special_booth:
+            # ── Booth element ──────────────────────────────────────────────
+            if special_booth:
+                name = special_booth['name']
+                location = special_booth['location']
+                logo_url = ''
+                safe_cats = ''
+                safe_desc = ''
+            else:
+                ex_ids = [int(i) for i in ex_ids_str.split(',') if i.strip()]
+                exs    = [exhibitors[i] for i in ex_ids if i in exhibitors]
+                if not exs:
+                    continue
+                ex = exs[0]
+                name      = ex.get('name', 'Unknown')
+                logo_url  = (LOGO_BASE + ex['logo']) if ex.get('logo') else ''
+                location  = exhibitor_to_location.get(ex['id'], '')
+
+                # Resolve category names for this exhibitor
+                cat_ids   = ex.get('categories', [])
+                cat_names = ', '.join(categories.get(cid, '') for cid in cat_ids if categories.get(cid))
+                description = (ex.get('description') or '').strip()
+                # Strip HTML tags from description
+                description = re.sub(r'<[^>]+>', ' ', description)  # replace tags with space to preserve word boundaries
+                description = re.sub(r'\s+', ' ', description).strip()  # collapse multiple spaces
+                # Escape for HTML attribute
+                safe_cats = cat_names.replace('"', '&quot;').replace("'", '&#39;')
+                safe_desc = description.replace('"', '&quot;').replace("'", '&#39;')
+
+            safe_name = name.replace('"', '&quot;')
+            safe_loc  = location.replace('"', '&quot;')
+            area      = float(e['width']) * float(e['height'])
+
             # AABB in world metres (used by proximity detector)
             aabb_min_x = round(x, 3)
             aabb_min_z = round(z, 3)
@@ -335,6 +357,19 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             aabb_min_z = round(min(c[1] for c in rotated_corners), 3)
             aabb_max_x = round(max(c[0] for c in rotated_corners), 3)
             aabb_max_z = round(max(c[1] for c in rotated_corners), 3)
+            #Fix child booth y
+            this_booth_y = BOOTH_Y
+            if location.upper() in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7', 'LBE3']:
+                this_booth_y += 0.02
+
+            # GH1-GH17 booths sit on top of Gaming Hub, so we need to raise them slightly to avoid z-fighting.
+            gh_match = re.match(r'^GH([1-9]|1[0-7])$', location.upper())
+            if gh_match:
+                this_booth_y += 0.02
+
+            # Fix z-fighting by giving Gaming Stage a slightly higher Y
+            if guid == "bAWE Gaming Stage":
+                this_booth_y += 0.005
 
             if area < 400:
                 # Small booth: floor space + table block + info wall
@@ -347,32 +382,33 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 )
                 booth_html.append(
                     f'          <a-plane position="0 0 0" '
+                    f'          <a-plane position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="0 0 {h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="0 0 {-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{-w/2-border_thickness/2:.3f} 0 0" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{w/2+border_thickness/2:.3f} 0 0" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box class="booth-furniture" position="0 0.4 0" '
+                    f'          <a-box class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+0.4:.4f} {z+h/2:.3f}" '
                     f'width="{w*0.6:.3f}" height="0.8" depth="{h*0.4:.3f}" color="#4CC3D9"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-plane class="booth-furniture" position="0 1.25 {-h/2-0.01:.3f}" '
+                    f'          <a-plane class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+1.25:.4f} {z-0.01:.3f}" '
                     f'width="{w:.3f}" height="2.5" color="#FFF" rotation="0 0 0">'
                 )
                 booth_html.append(
@@ -395,7 +431,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
-                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="0 0.05 0" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {this_booth_y+0.05:.4f} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')
@@ -409,29 +445,29 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     f'position="{x:.3f} {BOOTH_Y} {z:.3f}" rotation="0 {-rot:.3f} 0">'
                 )
                 booth_html.append(
-                    f'          <a-plane position="0 0 0" '
+                    f'          <a-plane position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'rotation="-90 0 0" width="{w:.3f}" height="{h:.3f}" color="{fill}"></a-plane>'
                 )
                 # Black border frame (4 thin boxes around edges)
                 border_thickness = 0.01
                 booth_html.append(
-                    f'          <a-box position="0 0 {h/2+border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2+h/2+border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="0 0 {-h/2-border_thickness/2:.3f}" '
+                    f'          <a-box position="{x+w/2:.3f} {this_booth_y:.4f} {z+h/2-h/2-border_thickness/2:.3f}" '
                     f'width="{w+border_thickness:.3f}" height="0.001" depth="{border_thickness:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{-w/2-border_thickness/2:.3f} 0 0" '
+                    f'          <a-box position="{x+w/2-w/2-border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-box position="{w/2+border_thickness/2:.3f} 0 0" '
+                    f'          <a-box position="{x+w/2+w/2+border_thickness/2:.3f} {this_booth_y:.4f} {z+h/2:.3f}" '
                     f'width="{border_thickness:.3f}" height="0.001" depth="{h:.3f}" color="#000000"></a-box>'
                 )
                 booth_html.append(
-                    f'          <a-entity class="booth-furniture" position="0 2.5 0">'
+                    f'          <a-entity class="booth-furniture" position="{x+w/2:.3f} {this_booth_y+2.5:.4f} {z+h/2:.3f}">'
                 )
                 booth_html.append(
                     f'            <a-text value="{safe_name}" align="center" color="#000" '
@@ -453,7 +489,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                     booth_html.append(
                         f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
                         f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
-                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="0 0.05 0" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {this_booth_y+0.05:.4f} {z+h/2:.3f}" '
                         f'rotation="-90 0 0" visible="false"></a-text>'
                     )
                 booth_html.append('        </a-entity>')

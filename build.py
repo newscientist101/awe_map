@@ -277,7 +277,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 f'color="{PILLAR_COLOR}"></a-box>'
             )
 
-        # AWE Gaming Stage and Gaming Hub are special cases that should be treated as booths
+        # Special cases that should be treated as booths
         # even if they don't have exhibitor IDs.
         special_booth = None
         if not ex_ids_str:
@@ -327,9 +327,9 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             aabb_max_x = round(x + w, 3)
             aabb_max_z = round(z + h, 3)
 
-            # NIPA1-NIPA7 booths sit on top of booth 1111, so we need to raise them slightly to avoid z-fighting.
+            #Fix child booth y
             this_booth_y = BOOTH_Y
-            if location.upper() in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7']:
+            if location.upper() in ['NIPA1', 'NIPA2', 'NIPA3', 'NIPA4', 'NIPA5', 'NIPA6', 'NIPA7', 'LBE3']:
                 this_booth_y += 0.02
 
             # GH1-GH17 booths sit on top of Gaming Hub, so we need to raise them slightly to avoid z-fighting.

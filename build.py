@@ -549,9 +549,13 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     hud_inner = hud_inner.replace('floor-polygon="', 'floor-polygon="materialType: basic; ')
 
     # Remove Text, Icons, and Legend&Logo layers from HUD to keep it clean
+    # Also remove booth furniture and pillars from HUD content entirely to reduce DOM size
     for layer in ['Text', 'Icons', 'Legend&Logo']:
         hud_inner = re.sub(rf'<a-(entity|plane)[^>]*data-layer="{layer}"[^>]*>.*?</a-\1>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
 
+    hud_inner = re.sub(r'<a-box class="hud-furniture".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-plane class="hud-furniture".*?</a-plane>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-box class="hud-pillar".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'<a-text.*?</a-text>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'<a-image.*?</a-image>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'id="([^"]+)"', r'id="hud-\1"', hud_inner)
@@ -641,24 +645,30 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         init: function () {
           this.applyMask = this.applyMask.bind(this);
           this.el.addEventListener('object3dset', this.applyMask);
+          this.materialCache = new Map();
           this.applyMask();
         },
         remove: function () {
           this.el.removeEventListener('object3dset', this.applyMask);
+          this.materialCache.clear();
         },
         applyMask: function (evt) {
           var stencilRef = this.data.stencilRef;
           var root = (evt && evt.detail && evt.detail.object) || this.el.object3D;
           if (!root) return;
 
+          var self = this;
           root.traverse(function (obj) {
             if (obj.material) {
               var processMat = function (m) {
                 if (m.stencilWrite && m.stencilRef === stencilRef) return m;
+                if (self.materialCache.has(m)) return self.materialCache.get(m);
+
                 var m2 = m.clone();
                 m2.stencilWrite = true;
                 m2.stencilRef = stencilRef;
                 m2.stencilFunc = THREE.EqualStencilFunc;
+                self.materialCache.set(m, m2);
                 return m2;
               };
 
@@ -822,6 +832,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           this.worldPos = new THREE.Vector3();
           this.worldQuat = new THREE.Quaternion();
           this.worldEuler = new THREE.Euler();
+          this.lastPos = new THREE.Vector3();
+          this.lastYaw = 0;
 
           this.onKeydown = function(e) {
             if (e.key.toLowerCase() === 'm') {
@@ -835,8 +847,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         },
         tick: function () {
           var shouldBeVisible = this.visible && !dollhouseMode;
-          if (this.el.getAttribute('visible') !== shouldBeVisible) {
-            this.el.setAttribute('visible', shouldBeVisible);
+          if (this.el.object3D.visible !== shouldBeVisible) {
+            this.el.object3D.visible = shouldBeVisible;
           }
           if (!shouldBeVisible) return;
 
@@ -849,6 +861,13 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           this.camera.getWorldPosition(this.worldPos);
           this.camera.getWorldQuaternion(this.worldQuat);
           this.worldEuler.setFromQuaternion(this.worldQuat, 'YXZ');
+
+          // Throttle updates: only if camera moved or rotated significantly
+          if (this.worldPos.distanceToSquared(this.lastPos) < 0.000001 &&
+              Math.abs(this.worldEuler.y - this.lastYaw) < 0.0001) return;
+
+          this.lastPos.copy(this.worldPos);
+          this.lastYaw = this.worldEuler.y;
 
           // Head-locked HUD: stays in the same place on the screen.
           // To keep the map "North-up", we counter-rotate the rotator by the camera's yaw.
@@ -966,6 +985,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         return canvas;
       };
 
+      var panelGeometry = new THREE.PlaneGeometry(2.4, 3.75);
       window.showInfoPanel = function showInfoPanel(boothEl) {
         if (window.currentBooth === boothEl) return;
         window.hideInfoPanel();
@@ -993,10 +1013,9 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         var texture = new THREE.CanvasTexture(panelCanvas);
 
         // Create a single plane with the canvas texture
-        var geometry = new THREE.PlaneGeometry(2.4, 3.75);
         // DoubleSide so it's visible regardless of rotation
         var material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: false });
-        var mesh = new THREE.Mesh(geometry, material);
+        var mesh = new THREE.Mesh(panelGeometry, material);
 
         // Wrap in an a-entity so hideInfoPanel can remove it
         // MUST append to scene FIRST so A-Frame initialises object3D
@@ -1026,12 +1045,15 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         window.currentBooth = null;
       };
 
-      window.pointToAABBDist = function pointToAABBDist(px, pz, minx, minz, maxx, maxz) {
-        // Signed distance from point (px,pz) to axis-aligned rectangle.
-        // Returns 0 if inside, positive distance if outside.
-        var dx = Math.max(minx - px, 0, px - maxx);
-        var dz = Math.max(minz - pz, 0, pz - maxz);
-        return Math.sqrt(dx*dx + dz*dz);
+      window.pointToAABBSqDist = function pointToAABBSqDist(px, pz, minx, minz, maxx, maxz) {
+        // Squared distance from point (px,pz) to axis-aligned rectangle.
+        var dx = 0;
+        if (px < minx) dx = minx - px;
+        else if (px > maxx) dx = px - maxx;
+        var dz = 0;
+        if (pz < minz) dz = minz - pz;
+        else if (pz > maxz) dz = pz - maxz;
+        return dx*dx + dz*dz;
       };
 
       // Start proximity polling once the scene is ready
@@ -1057,6 +1079,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           });
 
           var worldPos = new THREE.Vector3();
+          var TRIGGER_DIST_SQ = window.TRIGGER_DIST * window.TRIGGER_DIST;
 
           window._proximityInterval = setInterval(function() {
             if (dollhouseMode) {
@@ -1067,17 +1090,17 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             var px = worldPos.x;
             var pz = worldPos.z;
             var closest     = null;
-            var closestDist = Infinity;
+            var closestDistSq = Infinity;
 
             for (var i = 0; i < boothData.length; i++) {
               var b = boothData[i];
-              var d = window.pointToAABBDist(px, pz, b.minx, b.minz, b.maxx, b.maxz);
-              if (d < closestDist) { closestDist = d; closest = b.el; }
+              var d2 = window.pointToAABBSqDist(px, pz, b.minx, b.minz, b.maxx, b.maxz);
+              if (d2 < closestDistSq) { closestDistSq = d2; closest = b.el; }
             }
 
             // Show at TRIGGER_DIST; hide only when 2x away (hysteresis)
-            var HIDE_DIST = window.TRIGGER_DIST * 2.0;
-            if (closest && closestDist <= window.TRIGGER_DIST) {
+            var HIDE_DIST_SQ = (window.TRIGGER_DIST * 2.0) * (window.TRIGGER_DIST * 2.0);
+            if (closest && closestDistSq <= TRIGGER_DIST_SQ) {
               if (closest !== window.dwellTarget) {
                 clearTimeout(window.dwellTimer);
                 window.dwellTarget = closest;
@@ -1085,12 +1108,12 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                   window.showInfoPanel(window.dwellTarget);
                 }, window.DWELL_MS);
               }
-            } else if (!closest || closestDist > HIDE_DIST) {
+            } else if (!closest || closestDistSq > HIDE_DIST_SQ) {
               if (window.dwellTimer) { clearTimeout(window.dwellTimer); window.dwellTimer = null; }
               window.dwellTarget = null;
               if (window.currentBooth) window.hideInfoPanel();
             }
-          }, 100);  // poll every 100 ms
+          }, 250);  // poll every 250 ms (was 100ms)
         }
         if (scene && scene.hasLoaded) { startProximityLoop(); }
         else { document.querySelector('a-scene').addEventListener('loaded', startProximityLoop); }

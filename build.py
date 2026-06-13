@@ -545,6 +545,9 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     hud_inner = hud_inner.replace('class="booth-trigger"', 'class="hud-booth-trigger"')
     hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar" visible="false"')
     hud_inner = hud_inner.replace('id="outer-walls"', 'id="outer-walls" visible="false"')
+    # Use basic material for HUD elements to improve performance
+    hud_inner = hud_inner.replace('floor-polygon="', 'floor-polygon="materialType: basic; ')
+
     # Remove Text, Icons, and Legend&Logo layers from HUD to keep it clean
     for layer in ['Text', 'Icons', 'Legend&Logo']:
         hud_inner = re.sub(rf'<a-(entity|plane)[^>]*data-layer="{layer}"[^>]*>.*?</a-\1>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
@@ -564,84 +567,105 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     <script>
       // floor-polygon: renders an arbitrary flat polygon as a Three.js mesh
       // at a precise world-space Y, completely avoiding z-fighting.
-      AFRAME.registerComponent('floor-polygon', {
-        schema: {
-          points: { type: 'string' },
-          cells:  { type: 'string' },
-          color:  { type: 'color',  default: '#888888' },
-          y:      { type: 'number', default: 0 }
-        },
-        init: function () {
-          var data  = this.data;
-          var pts   = JSON.parse(data.points);  // [[x,z], ...] metres
-          var cells = data.cells ? JSON.parse(data.cells) : null;
-          var geo;
+      (function() {
+        var materialCache = {};
 
-          if (cells && cells.length > 0) {
-            // Use pre-triangulated cells from source data
-            geo = new THREE.BufferGeometry();
-            var vertices = [];
-            for (var i = 0; i < cells.length; i++) {
-              var cell = cells[i];
-              // Each cell is [idx1, idx2, idx3]
-              for (var j = 0; j < 3; j++) {
-                var p = pts[cell[j]];
-                vertices.push(p[0], 0, -p[1]); // x, y, z (where z is -shapeY)
+        AFRAME.registerComponent('floor-polygon', {
+          schema: {
+            points: { type: 'string' },
+            cells:  { type: 'string' },
+            color:  { type: 'color',  default: '#888888' },
+            y:      { type: 'number', default: 0 },
+            materialType: { type: 'string', default: 'standard' }
+          },
+          init: function () {
+            var data  = this.data;
+            var pts   = JSON.parse(data.points);  // [[x,z], ...] metres
+            var cells = data.cells ? JSON.parse(data.cells) : null;
+            var geo;
+
+            if (cells && cells.length > 0) {
+              // Use pre-triangulated cells from source data
+              geo = new THREE.BufferGeometry();
+              var vertices = [];
+              for (var i = 0; i < cells.length; i++) {
+                var cell = cells[i];
+                // Each cell is [idx1, idx2, idx3]
+                for (var j = 0; j < 3; j++) {
+                  var p = pts[cell[j]];
+                  vertices.push(p[0], 0, -p[1]); // x, y, z (where z is -shapeY)
+                }
               }
+              geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+              geo.computeVertexNormals();
+            } else {
+              // Fallback to re-triangulation if cells not available
+              var shape = new THREE.Shape();
+              shape.moveTo(pts[0][0], pts[0][1]);
+              for (var i = 1; i < pts.length; i++) {
+                shape.lineTo(pts[i][0], pts[i][1]);
+              }
+              shape.closePath();
+              geo = new THREE.ShapeGeometry(shape);
+              geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
             }
-            geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            geo.computeVertexNormals();
-          } else {
-            // Fallback to re-triangulation if cells not available
-            var shape = new THREE.Shape();
-            shape.moveTo(pts[0][0], pts[0][1]);
-            for (var i = 1; i < pts.length; i++) {
-              shape.lineTo(pts[i][0], pts[i][1]);
-            }
-            shape.closePath();
-            geo = new THREE.ShapeGeometry(shape);
-            geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-          }
 
-          var mat  = new THREE.MeshStandardMaterial({
-            color: new THREE.Color(data.color),
-            side: THREE.DoubleSide,
-            roughness: 0.8,
-            metalness: 0.0
-          });
-          var mesh = new THREE.Mesh(geo, mat);
-          mesh.position.y = data.y;
-          this.el.setObject3D('mesh', mesh);
-        }
-      });
+            var cacheKey = data.color + '_' + data.materialType;
+            var mat = materialCache[cacheKey];
+            if (!mat) {
+              var matProps = {
+                color: new THREE.Color(data.color),
+                side: THREE.DoubleSide
+              };
+              if (data.materialType === 'basic') {
+                mat = new THREE.MeshBasicMaterial(matProps);
+              } else {
+                matProps.roughness = 0.8;
+                matProps.metalness = 0.0;
+                mat = new THREE.MeshStandardMaterial(matProps);
+              }
+              materialCache[cacheKey] = mat;
+            }
+
+            var mesh = new THREE.Mesh(geo, mat);
+            mesh.position.y = data.y;
+            this.el.setObject3D('mesh', mesh);
+          }
+        });
+      })();
 
       AFRAME.registerComponent('stencil-masked', {
         schema: {
           stencilRef: { type: 'number', default: 1 }
         },
         init: function () {
-          this.el.addEventListener('object3dset', this.applyMask.bind(this));
+          this.applyMask = this.applyMask.bind(this);
+          this.el.addEventListener('object3dset', this.applyMask);
           this.applyMask();
         },
-        applyMask: function () {
+        remove: function () {
+          this.el.removeEventListener('object3dset', this.applyMask);
+        },
+        applyMask: function (evt) {
           var stencilRef = this.data.stencilRef;
-          this.el.object3D.traverse(function (obj) {
+          var root = (evt && evt.detail && evt.detail.object) || this.el.object3D;
+          if (!root) return;
+
+          root.traverse(function (obj) {
             if (obj.material) {
-              // Clone materials to avoid affecting shared materials in the main scene
+              var processMat = function (m) {
+                if (m.stencilWrite && m.stencilRef === stencilRef) return m;
+                var m2 = m.clone();
+                m2.stencilWrite = true;
+                m2.stencilRef = stencilRef;
+                m2.stencilFunc = THREE.EqualStencilFunc;
+                return m2;
+              };
+
               if (Array.isArray(obj.material)) {
-                obj.material = obj.material.map(function(m) {
-                  var m2 = m.clone();
-                  m2.stencilWrite = true;
-                  m2.stencilRef = stencilRef;
-                  m2.stencilFunc = THREE.EqualStencilFunc;
-                  return m2;
-                });
+                obj.material = obj.material.map(processMat);
               } else {
-                var m = obj.material.clone();
-                m.stencilWrite = true;
-                m.stencilRef = stencilRef;
-                m.stencilFunc = THREE.EqualStencilFunc;
-                obj.material = m;
+                obj.material = processMat(obj.material);
               }
             }
           });
@@ -789,21 +813,25 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
 
       AFRAME.registerComponent('hud-manager', {
         init: function () {
-          this.camera = document.querySelector('a-camera');
+          this.camera = null;
           this.rotator = document.querySelector('#hud-rotator');
           this.content = document.querySelector('#hud-content');
           this.marker = document.querySelector('#hud-marker');
           this.visible = true;
 
-          window.addEventListener('keydown', function(e) {
+          this.worldPos = new THREE.Vector3();
+          this.worldQuat = new THREE.Quaternion();
+          this.worldEuler = new THREE.Euler();
+
+          this.onKeydown = function(e) {
             if (e.key.toLowerCase() === 'm') {
               this.visible = !this.visible;
             }
-          }.bind(this));
-
-          this.el.addEventListener('toggle-hud', function() {
-            this.visible = !this.visible;
-          }.bind(this));
+          }.bind(this);
+          window.addEventListener('keydown', this.onKeydown);
+        },
+        remove: function () {
+          window.removeEventListener('keydown', this.onKeydown);
         },
         tick: function () {
           var shouldBeVisible = this.visible && !dollhouseMode;
@@ -812,19 +840,23 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           }
           if (!shouldBeVisible) return;
 
-          var worldPos = new THREE.Vector3();
-          this.camera.object3D.getWorldPosition(worldPos);
-          var worldQuat = new THREE.Quaternion();
-          this.camera.object3D.getWorldQuaternion(worldQuat);
-          var worldEuler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
+          if (!this.camera) {
+            var camEl = document.querySelector('[camera]');
+            if (camEl) this.camera = camEl.object3D;
+            if (!this.camera) return;
+          }
+
+          this.camera.getWorldPosition(this.worldPos);
+          this.camera.getWorldQuaternion(this.worldQuat);
+          this.worldEuler.setFromQuaternion(this.worldQuat, 'YXZ');
 
           // Head-locked HUD: stays in the same place on the screen.
           // To keep the map "North-up", we counter-rotate the rotator by the camera's yaw.
-          this.rotator.object3D.rotation.y = -worldEuler.y;
+          this.rotator.object3D.rotation.y = -this.worldEuler.y;
 
           // The player is at the center of the HUD.
           // We shift the map content by the negative of the camera position.
-          this.content.object3D.position.set(-worldPos.x, 0, -worldPos.z);
+          this.content.object3D.position.set(-this.worldPos.x, 0, -this.worldPos.z);
 
           // Marker stays at the center of the HUD
           this.marker.object3D.position.set(0, 5, 0);
@@ -1011,23 +1043,38 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             setTimeout(startProximityLoop, 200);
             return;
           }
+
+          var boothData = [];
+          var booths = document.querySelectorAll('.booth-trigger');
+          booths.forEach(function(b) {
+            boothData.push({
+              el: b,
+              minx: parseFloat(b.dataset.minx),
+              minz: parseFloat(b.dataset.minz),
+              maxx: parseFloat(b.dataset.maxx),
+              maxz: parseFloat(b.dataset.maxz)
+            });
+          });
+
+          var worldPos = new THREE.Vector3();
+
           window._proximityInterval = setInterval(function() {
             if (dollhouseMode) {
               if (window.currentBooth) { clearTimeout(window.dwellTimer); window.dwellTimer = null; window.dwellTarget = null; window.hideInfoPanel(); }
               return;
             }
-            var pos = camEl.object3D.getWorldPosition(new THREE.Vector3());
-            var px = pos.x;
-            var pz = pos.z;
+            camEl.object3D.getWorldPosition(worldPos);
+            var px = worldPos.x;
+            var pz = worldPos.z;
             var closest     = null;
             var closestDist = Infinity;
-            var booths = document.querySelectorAll('.booth-trigger');
-            booths.forEach(function(b) {
-              var d = window.pointToAABBDist(px, pz,
-                parseFloat(b.dataset.minx), parseFloat(b.dataset.minz),
-                parseFloat(b.dataset.maxx), parseFloat(b.dataset.maxz));
-              if (d < closestDist) { closestDist = d; closest = b; }
-            });
+
+            for (var i = 0; i < boothData.length; i++) {
+              var b = boothData[i];
+              var d = window.pointToAABBDist(px, pz, b.minx, b.minz, b.maxx, b.maxz);
+              if (d < closestDist) { closestDist = d; closest = b.el; }
+            }
+
             // Show at TRIGGER_DIST; hide only when 2x away (hysteresis)
             var HIDE_DIST = window.TRIGGER_DIST * 2.0;
             if (closest && closestDist <= window.TRIGGER_DIST) {
@@ -1071,7 +1118,9 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             </a-entity>
             <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
           </a-entity>
-        </a-camera>
+        </a-entity>
+        <a-entity oculus-touch-controls="hand: left" vr-controller-sprint></a-entity>
+        <a-entity oculus-touch-controls="hand: right"></a-entity>
       </a-entity>
 
       <a-entity id="expo-scene">

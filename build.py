@@ -541,23 +541,37 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         wall_html.append('        </a-entity>')
 
     inner = '\n'.join(booth_html) + ('\n' + '\n'.join(wall_html) if wall_html else '')
-    hud_inner = inner.replace('class="booth-furniture"', 'class="hud-furniture" visible="false"')
-    hud_inner = hud_inner.replace('class="booth-trigger"', 'class="hud-booth-trigger"')
-    hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar" visible="false"')
-    hud_inner = hud_inner.replace('id="outer-walls"', 'id="outer-walls" visible="false"')
-    # Use basic material for HUD elements to improve performance
-    hud_inner = hud_inner.replace('floor-polygon="', 'floor-polygon="materialType: basic; ')
+    # HUD content: start with the same inner HTML but strip it down for performance
+    hud_inner = inner
 
-    # Remove Text, Icons, and Legend&Logo layers from HUD to keep it clean
-    # Also remove booth furniture and pillars from HUD content entirely to reduce DOM size
+    # 1. Remove large data attributes and unnecessary booth metadata from HUD
+    hud_inner = re.sub(r' data-(name|cats|desc|minx|minz|maxx|maxz)="[^"]*"', '', hud_inner)
+
+    # 2. Flatten booth triggers: replace the <a-entity class="booth-trigger"> with its children
+    # and use regex to unwrap. We match the opening tag and its corresponding closing tag.
+    # We only remove the booth-trigger wrapper, keeping its children (like the floor plane).
+    hud_inner = re.sub(r'<a-entity class="booth-trigger"[^>]*>(.*?)</a-entity>', r'\1', hud_inner, flags=re.DOTALL)
+
+    # 3. Rename classes and IDs to prevent conflicts
+    hud_inner = hud_inner.replace('class="booth-furniture"', 'class="hud-furniture"')
+    hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar"')
+
+    # 4. Use basic material for HUD elements and disable lighting (shader: flat)
+    hud_inner = hud_inner.replace('floor-polygon="', 'floor-polygon="materialType: basic; ')
+    hud_inner = hud_inner.replace('<a-plane ', '<a-plane material="shader: flat" ')
+
+    # 5. Remove complex layers from HUD to keep it clean and fast
     for layer in ['Text', 'Icons', 'Legend&Logo']:
         hud_inner = re.sub(rf'<a-(entity|plane)[^>]*data-layer="{layer}"[^>]*>.*?</a-\1>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
 
+    # 6. Remove expensive booth furniture, pillars, text and images from HUD content
     hud_inner = re.sub(r'<a-box class="hud-furniture".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'<a-plane class="hud-furniture".*?</a-plane>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'<a-box class="hud-pillar".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-box[^>]*color="#000000".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL) # Remove border boxes
     hud_inner = re.sub(r'<a-text.*?</a-text>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'<a-image.*?</a-image>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'id="outer-walls".*?</a-entity>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'id="([^"]+)"', r'id="hud-\1"', hud_inner)
 
     html = """<!DOCTYPE html>
@@ -622,6 +636,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 side: THREE.DoubleSide
               };
               if (data.materialType === 'basic') {
+                matProps.combine = THREE.NoCombination;
                 mat = new THREE.MeshBasicMaterial(matProps);
               } else {
                 matProps.roughness = 0.8;
@@ -1121,7 +1136,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     </script>
   </head>
   <body>
-    <a-scene scale-switcher>
+    <a-scene scale-switcher stats>
       <a-sky color="#ECECEC"></a-sky>
 
         <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
@@ -1139,7 +1154,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 """ + hud_inner + """
               </a-entity>
             </a-entity>
-            <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
+            <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0" material="shader: flat"></a-sphere>
           </a-entity>
         </a-entity>
         <a-entity oculus-touch-controls="hand: left" vr-controller-sprint></a-entity>

@@ -165,11 +165,21 @@ def parse_metadata(data_file):
     data  = json.loads(content[start:end])
     exhibitors = {ex['id']: ex for ex in data.get('exhibitors', [])}
     categories = {cat['id']: cat['name'] for cat in data.get('categories', [])}
-    return exhibitors, categories
+    booths = data.get('booths', [])
+
+    # Map exhibitor ID to location (booth externalId)
+    exhibitor_to_location = {}
+    for booth in booths:
+        location = booth.get('externalId')
+        if location:
+            for ex_id in booth.get('exhibitors', []):
+                exhibitor_to_location[ex_id] = location
+
+    return exhibitors, categories, exhibitor_to_location
 
 # ── A-Frame generation ─────────────────────────────────────────────────────────
 
-def generate_aframe(elements, exhibitors, categories, output_file):
+def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, output_file):
     valid = [e for e in elements if e['x'] and e['y'] and e['width'] and e['height']]
 
     min_x = min(float(e['x'])                    for e in valid)
@@ -222,8 +232,12 @@ def generate_aframe(elements, exhibitors, categories, output_file):
     BG_Y_STEP = 0.001
     bg_y_map = {id(e): round(BG_Y_BASE + i * BG_Y_STEP, 4) for i, e in enumerate(bg_elements)}
     bg_ids   = {id(e) for e in bg_elements}
-    # Booth floors render just above ground level (5mm) to prevent z-fighting with camera/background
-    BOOTH_Y = 0.005
+
+    # Highest Y assigned to any background element
+    MAX_BG_Y = BG_Y_BASE + len(bg_elements) * BG_Y_STEP
+
+    # Booth floors render above ALL background elements to prevent z-fighting with logo/legend
+    BOOTH_Y = round(MAX_BG_Y + 0.01, 4)
 
     for e in valid:
         x = (float(e['x']) - cx) * M
@@ -255,6 +269,8 @@ def generate_aframe(elements, exhibitors, categories, output_file):
             safe_name = name.replace('"', '&quot;')
             logo_url  = (LOGO_BASE + ex['logo']) if ex.get('logo') else ''
             area      = float(e['width']) * float(e['height'])
+            location  = exhibitor_to_location.get(ex['id'], '')
+            safe_loc  = location.replace('"', '&quot;')
 
             # Resolve category names for this exhibitor
             cat_ids   = ex.get('categories', [])
@@ -314,12 +330,25 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     f'            <a-text value="{safe_name}" align="center" color="#000" '
                     f'width="2.5" position="0 0.5 0.05"></a-text>'
                 )
+                if location:
+                    booth_html.append(
+                        f'            <a-text value="{safe_loc}" align="center" color="#000" '
+                        f'width="2.0" position="0 0.8 0.05"></a-text>'
+                    )
                 if logo_url:
                     booth_html.append(
                         f'            <a-image src="{logo_url}" width="0.8" '
                         f'position="0 -0.2 0.05" aspect-ratio></a-image>'
                     )
                 booth_html.append('          </a-plane>')
+                if location:
+                    wrap_count = max(1, len(safe_loc))
+                    booth_html.append(
+                        f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
+                        f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {BOOTH_Y+0.05:.3f} {z+h/2:.3f}" '
+                        f'rotation="-90 0 0" visible="false"></a-text>'
+                    )
                 booth_html.append('        </a-entity>')
             else:
                 # Large booth: colored floor
@@ -358,12 +387,25 @@ def generate_aframe(elements, exhibitors, categories, output_file):
                     f'            <a-text value="{safe_name}" align="center" color="#000" '
                     f'width="6" position="0 0.5 0.05"></a-text>'
                 )
+                if location:
+                    booth_html.append(
+                        f'            <a-text value="{safe_loc}" align="center" color="#000" '
+                        f'width="5" position="0 1.2 0.05"></a-text>'
+                    )
                 if logo_url:
                     booth_html.append(
                         f'            <a-image src="{logo_url}" width="1.5" '
                         f'position="0 -0.5 0.05" aspect-ratio></a-image>'
                     )
                 booth_html.append('          </a-entity>')
+                if location:
+                    wrap_count = max(1, len(safe_loc))
+                    booth_html.append(
+                        f'          <a-text class="dollhouse-location" value="{safe_loc}" align="center" color="#FFF" '
+                        f'font="https://cdn.aframe.io/fonts/Roboto-msdf.json" shader="msdf" negate="true" '
+                        f'width="{w:.3f}" wrap-count="{wrap_count}" position="{x+w/2:.3f} {BOOTH_Y+0.05:.3f} {z+h/2:.3f}" '
+                        f'rotation="-90 0 0" visible="false"></a-text>'
+                    )
                 booth_html.append('        </a-entity>')
 
         elif id(e) in bg_ids:
@@ -522,6 +564,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           window.addEventListener('keydown', function(e) {
             var walls = document.querySelector('#outer-walls');
             var furniture = document.querySelectorAll('.booth-furniture');
+            var locs = document.querySelectorAll('.dollhouse-location');
             var pillars = document.querySelectorAll('.structural-pillar');
             if (e.key === '1') {
               dollhouseMode = false;
@@ -530,6 +573,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'true');
               furniture.forEach(function(f) { f.setAttribute('visible', 'true'); });
+              locs.forEach(function(l) { l.setAttribute('visible', 'false'); });
               pillars.forEach(function(p) { p.setAttribute('visible', 'true'); });
             } else if (e.key === '2') {
               dollhouseMode = true;
@@ -538,6 +582,7 @@ def generate_aframe(elements, exhibitors, categories, output_file):
               camera.setAttribute('position','0 1.753 0');
               if (walls) walls.setAttribute('visible', 'false');
               furniture.forEach(function(f) { f.setAttribute('visible', 'false'); });
+              locs.forEach(function(l) { l.setAttribute('visible', 'true'); });
               pillars.forEach(function(p) { p.setAttribute('visible', 'false'); });
             }
           });
@@ -574,8 +619,8 @@ def generate_aframe(elements, exhibitors, categories, output_file):
           this.el.addEventListener('materialtextureloaded', function(e) {
             var img   = e.detail.texture.image;
             var ratio = img.height / img.width;
-            var width = this.getAttribute('width');
-            this.setAttribute('height', width * ratio);
+            var width = this.el.getAttribute('width');
+            this.el.setAttribute('height', width * ratio);
           }.bind(this));
         }
       });
@@ -826,16 +871,21 @@ def main():
 
     print('\n[2/3] Parsing SVG and exhibitor data...')
     elements              = parse_svg(BASE_DIR / 'fp.svg.js')
-    exhibitors, categories = parse_metadata(BASE_DIR / 'data.js')
+    exhibitors, categories, ex_to_loc = parse_metadata(BASE_DIR / 'data.js')
     print(f'  SVG elements: {len(elements)}, Exhibitors: {len(exhibitors)}, Categories: {len(categories)}')
 
     # Save parsed JSON alongside the HTML for debugging / inspection
     parsed_out = BASE_DIR / 'parsed_data.json'
     with open(parsed_out, 'w') as f:
-        json.dump(elements, f, indent=2)
+        json.dump({
+            'elements': elements,
+            'exhibitors': exhibitors,
+            'categories': categories,
+            'ex_to_loc': ex_to_loc
+        }, f, indent=2)
 
     print('\n[3/3] Generating A-Frame scene...')
-    generate_aframe(elements, exhibitors, categories, BASE_DIR / 'index.html')
+    generate_aframe(elements, exhibitors, categories, ex_to_loc, BASE_DIR / 'index.html')
 
     print('\nDone.')
 

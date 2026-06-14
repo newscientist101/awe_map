@@ -541,19 +541,37 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         wall_html.append('        </a-entity>')
 
     inner = '\n'.join(booth_html) + ('\n' + '\n'.join(wall_html) if wall_html else '')
-    hud_inner = inner.replace('class="booth-furniture"', 'class="hud-furniture" visible="false"')
-    hud_inner = hud_inner.replace('class="booth-trigger"', 'class="hud-booth-trigger"')
-    hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar" visible="false"')
-    hud_inner = hud_inner.replace('id="outer-walls"', 'id="outer-walls" visible="false"')
-    # Use basic material for HUD elements to improve performance
-    hud_inner = hud_inner.replace('floor-polygon="', 'floor-polygon="materialType: basic; ')
+    # HUD content: start with the same inner HTML but strip it down for performance
+    hud_inner = inner
 
-    # Remove Text, Icons, and Legend&Logo layers from HUD to keep it clean
+    # 1. Remove large data attributes and unnecessary booth metadata from HUD
+    hud_inner = re.sub(r' data-(name|cats|desc|minx|minz|maxx|maxz)="[^"]*"', '', hud_inner)
+
+    # 2. Flatten booth triggers: replace the <a-entity class="booth-trigger"> with its children
+    # and use regex to unwrap. We match the opening tag and its corresponding closing tag.
+    # We only remove the booth-trigger wrapper, keeping its children (like the floor plane).
+    hud_inner = re.sub(r'<a-entity class="booth-trigger"[^>]*>(.*?)</a-entity>', r'\1', hud_inner, flags=re.DOTALL)
+
+    # 3. Rename classes and IDs to prevent conflicts
+    hud_inner = hud_inner.replace('class="booth-furniture"', 'class="hud-furniture"')
+    hud_inner = hud_inner.replace('class="structural-pillar"', 'class="hud-pillar"')
+
+    # 4. Use basic material for HUD elements and disable lighting (shader: flat)
+    hud_inner = hud_inner.replace('floor-polygon="', 'floor-polygon="materialType: basic; ')
+    hud_inner = hud_inner.replace('<a-plane ', '<a-plane material="shader: flat" ')
+
+    # 5. Remove complex layers from HUD to keep it clean and fast
     for layer in ['Text', 'Icons', 'Legend&Logo']:
         hud_inner = re.sub(rf'<a-(entity|plane)[^>]*data-layer="{layer}"[^>]*>.*?</a-\1>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
 
+    # 6. Remove expensive booth furniture, pillars, text and images from HUD content
+    hud_inner = re.sub(r'<a-box class="hud-furniture".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-plane class="hud-furniture".*?</a-plane>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-box class="hud-pillar".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'<a-box[^>]*color="#000000".*?</a-box>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL) # Remove border boxes
     hud_inner = re.sub(r'<a-text.*?</a-text>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'<a-image.*?</a-image>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
+    hud_inner = re.sub(r'id="outer-walls".*?</a-entity>', '', hud_inner, flags=re.IGNORECASE | re.DOTALL)
     hud_inner = re.sub(r'id="([^"]+)"', r'id="hud-\1"', hud_inner)
 
     html = """<!DOCTYPE html>
@@ -627,6 +645,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 side: THREE.DoubleSide
               };
               if (data.materialType === 'basic') {
+                matProps.combine = THREE.NoCombination;
                 mat = new THREE.MeshBasicMaterial(matProps);
               } else {
                 matProps.roughness = 0.8;
@@ -650,24 +669,30 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         init: function () {
           this.applyMask = this.applyMask.bind(this);
           this.el.addEventListener('object3dset', this.applyMask);
+          this.materialCache = new Map();
           this.applyMask();
         },
         remove: function () {
           this.el.removeEventListener('object3dset', this.applyMask);
+          this.materialCache.clear();
         },
         applyMask: function (evt) {
           var stencilRef = this.data.stencilRef;
           var root = (evt && evt.detail && evt.detail.object) || this.el.object3D;
           if (!root) return;
 
+          var self = this;
           root.traverse(function (obj) {
             if (obj.material) {
               var processMat = function (m) {
                 if (m.stencilWrite && m.stencilRef === stencilRef) return m;
+                if (self.materialCache.has(m)) return self.materialCache.get(m);
+
                 var m2 = m.clone();
                 m2.stencilWrite = true;
                 m2.stencilRef = stencilRef;
                 m2.stencilFunc = THREE.EqualStencilFunc;
+                self.materialCache.set(m, m2);
                 return m2;
               };
 
@@ -831,6 +856,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           this.worldPos = new THREE.Vector3();
           this.worldQuat = new THREE.Quaternion();
           this.worldEuler = new THREE.Euler();
+          this.lastPos = new THREE.Vector3();
+          this.lastYaw = 0;
 
           this.onKeydown = function(e) {
             if (e.key.toLowerCase() === 'm') {
@@ -844,8 +871,8 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         },
         tick: function () {
           var shouldBeVisible = this.visible && !dollhouseMode;
-          if (this.el.getAttribute('visible') !== shouldBeVisible) {
-            this.el.setAttribute('visible', shouldBeVisible);
+          if (this.el.object3D.visible !== shouldBeVisible) {
+            this.el.object3D.visible = shouldBeVisible;
           }
           if (!shouldBeVisible) return;
 
@@ -858,6 +885,13 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           this.camera.getWorldPosition(this.worldPos);
           this.camera.getWorldQuaternion(this.worldQuat);
           this.worldEuler.setFromQuaternion(this.worldQuat, 'YXZ');
+
+          // Throttle updates: only if camera moved or rotated significantly
+          if (this.worldPos.distanceToSquared(this.lastPos) < 0.000001 &&
+              Math.abs(this.worldEuler.y - this.lastYaw) < 0.0001) return;
+
+          this.lastPos.copy(this.worldPos);
+          this.lastYaw = this.worldEuler.y;
 
           // Head-locked HUD: stays in the same place on the screen.
           // To keep the map "North-up", we counter-rotate the rotator by the camera's yaw.
@@ -975,6 +1009,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         return canvas;
       };
 
+      var panelGeometry = new THREE.PlaneGeometry(2.4, 3.75);
       window.showInfoPanel = function showInfoPanel(boothEl) {
         if (window.currentBooth === boothEl) return;
         window.hideInfoPanel();
@@ -1002,10 +1037,9 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         var texture = new THREE.CanvasTexture(panelCanvas);
 
         // Create a single plane with the canvas texture
-        var geometry = new THREE.PlaneGeometry(2.4, 3.75);
         // DoubleSide so it's visible regardless of rotation
         var material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: false });
-        var mesh = new THREE.Mesh(geometry, material);
+        var mesh = new THREE.Mesh(panelGeometry, material);
 
         // Wrap in an a-entity so hideInfoPanel can remove it
         // MUST append to scene FIRST so A-Frame initialises object3D
@@ -1035,12 +1069,15 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
         window.currentBooth = null;
       };
 
-      window.pointToAABBDist = function pointToAABBDist(px, pz, minx, minz, maxx, maxz) {
-        // Signed distance from point (px,pz) to axis-aligned rectangle.
-        // Returns 0 if inside, positive distance if outside.
-        var dx = Math.max(minx - px, 0, px - maxx);
-        var dz = Math.max(minz - pz, 0, pz - maxz);
-        return Math.sqrt(dx*dx + dz*dz);
+      window.pointToAABBSqDist = function pointToAABBSqDist(px, pz, minx, minz, maxx, maxz) {
+        // Squared distance from point (px,pz) to axis-aligned rectangle.
+        var dx = 0;
+        if (px < minx) dx = minx - px;
+        else if (px > maxx) dx = px - maxx;
+        var dz = 0;
+        if (pz < minz) dz = minz - pz;
+        else if (pz > maxz) dz = pz - maxz;
+        return dx*dx + dz*dz;
       };
 
       // Start proximity polling once the scene is ready
@@ -1066,6 +1103,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           });
 
           var worldPos = new THREE.Vector3();
+          var TRIGGER_DIST_SQ = window.TRIGGER_DIST * window.TRIGGER_DIST;
 
           window._proximityInterval = setInterval(function() {
             if (dollhouseMode) {
@@ -1076,17 +1114,17 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             var px = worldPos.x;
             var pz = worldPos.z;
             var closest     = null;
-            var closestDist = Infinity;
+            var closestDistSq = Infinity;
 
             for (var i = 0; i < boothData.length; i++) {
               var b = boothData[i];
-              var d = window.pointToAABBDist(px, pz, b.minx, b.minz, b.maxx, b.maxz);
-              if (d < closestDist) { closestDist = d; closest = b.el; }
+              var d2 = window.pointToAABBSqDist(px, pz, b.minx, b.minz, b.maxx, b.maxz);
+              if (d2 < closestDistSq) { closestDistSq = d2; closest = b.el; }
             }
 
             // Show at TRIGGER_DIST; hide only when 2x away (hysteresis)
-            var HIDE_DIST = window.TRIGGER_DIST * 2.0;
-            if (closest && closestDist <= window.TRIGGER_DIST) {
+            var HIDE_DIST_SQ = (window.TRIGGER_DIST * 2.0) * (window.TRIGGER_DIST * 2.0);
+            if (closest && closestDistSq <= TRIGGER_DIST_SQ) {
               if (closest !== window.dwellTarget) {
                 clearTimeout(window.dwellTimer);
                 window.dwellTarget = closest;
@@ -1094,12 +1132,12 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                   window.showInfoPanel(window.dwellTarget);
                 }, window.DWELL_MS);
               }
-            } else if (!closest || closestDist > HIDE_DIST) {
+            } else if (!closest || closestDistSq > HIDE_DIST_SQ) {
               if (window.dwellTimer) { clearTimeout(window.dwellTimer); window.dwellTimer = null; }
               window.dwellTarget = null;
               if (window.currentBooth) window.hideInfoPanel();
             }
-          }, 100);  // poll every 100 ms
+          }, 250);  // poll every 250 ms (was 100ms)
         }
         if (scene && scene.hasLoaded) { startProximityLoop(); }
         else { document.querySelector('a-scene').addEventListener('loaded', startProximityLoop); }
@@ -1107,7 +1145,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
     </script>
   </head>
   <body>
-    <a-scene scale-switcher>
+    <a-scene scale-switcher stats>
       <a-sky color="#ECECEC"></a-sky>
 
       <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
@@ -1122,7 +1160,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
                 """ + hud_inner + """
               </a-entity>
             </a-entity>
-            <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0"></a-sphere>
+            <a-sphere id="hud-marker" stencil-masked="stencilRef: 1" radius="1.8" color="#FF3333" position="0 20 0" material="shader: flat"></a-sphere>
           </a-entity>
         </a-entity>
         <a-entity oculus-touch-controls="hand: left" vr-controller-sprint></a-entity>

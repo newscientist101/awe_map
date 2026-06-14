@@ -851,7 +851,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
           this.rotator = document.querySelector('#hud-rotator');
           this.content = document.querySelector('#hud-content');
           this.marker = document.querySelector('#hud-marker');
-          this.visible = true;
+          this.visible = false;
 
           this.worldPos = new THREE.Vector3();
           this.worldQuat = new THREE.Quaternion();
@@ -865,9 +865,15 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
             }
           }.bind(this);
           window.addEventListener('keydown', this.onKeydown);
+
+          this.toggleHUD = function() {
+            this.visible = !this.visible;
+          }.bind(this);
+          this.el.addEventListener('toggle-hud', this.toggleHUD);
         },
         remove: function () {
           window.removeEventListener('keydown', this.onKeydown);
+          this.el.removeEventListener('toggle-hud', this.toggleHUD);
         },
         tick: function () {
           var shouldBeVisible = this.visible && !dollhouseMode;
@@ -903,6 +909,15 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
 
           // Marker stays at the center of the HUD
           this.marker.object3D.position.set(0, 5, 0);
+        }
+      });
+
+      AFRAME.registerComponent('vr-hud-toggle', {
+        init: function() {
+          this.el.addEventListener('abuttondown', function() {
+            var hud = document.querySelector('#hud-map');
+            if (hud) hud.emit('toggle-hud');
+          });
         }
       });
 
@@ -1151,7 +1166,7 @@ def generate_aframe(elements, exhibitors, categories, exhibitor_to_location, out
       <a-entity id="camera-rig" movement-controls="acceleration: 65" position="0 0 0">
         <a-entity camera position="0 1.753 0" look-controls wasd-controls="enabled: false">
           <!-- HUD Map -->
-          <a-entity id="hud-map" position="-0.39 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="true">
+          <a-entity id="hud-map" position="0 0.0526 -0.35" rotation="90 0 0" scale="0.0015 0.0015 0.0015" hud-manager visible="false">
             <a-entity id="hud-map-bg" rounded-rect="width: 167; height: 167; radius: 3.6; color: #000; opacity: 0.55" rotation="-90 0 0" position="0 -1 0"></a-entity>
             <a-entity id="hud-mask" rounded-rect="width: 167; height: 167; radius: 3.6; stencilRef: 1" rotation="-90 0 0" position="0 -0.5 0"></a-entity>
             <!-- hud-rotator does not need rotation because floor-polygon children are already in XZ plane (facing camera) -->
